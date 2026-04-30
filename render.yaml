@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: macrotrack-backend
+    env: python
+    plan: free
+    rootDir: backend
+    buildCommand: >
+      pip install -r requirements.txt &&
+      python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false          # set manually in Render dashboard (Neon connection string)
+      - key: ANTHROPIC_API_KEY
+        sync: false          # optional – enables AI ranking & food lookup
+      - key: HF_HUB_OFFLINE
+        value: "1"
+      - key: TRANSFORMERS_OFFLINE
+        value: "1"
