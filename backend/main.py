@@ -300,7 +300,7 @@ class LookupResponse(BaseModel):
 
 # ── AI helpers ─────────────────────────────────────────────────────────────
 
-def _call_gemini(prompt: str) -> str:
+def _call_ai(prompt: str) -> str:
     client = resources.get('groq')
     if client is None:
         raise RuntimeError('GROQ_API_KEY is not set. Add it in the Render dashboard under Environment Variables.')
@@ -347,7 +347,7 @@ def _rank_bm25_only(candidates):
     } for i, c in enumerate(candidates[:5], 1)]
 
 
-def _rank_with_claude(candidates, req):
+def _rank_with_ai(candidates, req):
     rem = (f"Remaining: P {req.remaining_protein:.1f}g  C {req.remaining_carbs:.1f}g  "
            f"F {req.remaining_fat:.1f}g  {req.remaining_kcal:.0f} kcal")
     lines = [f"{i}. {c['food']['n']} (1 {c['food']['u']}): "
@@ -361,7 +361,7 @@ def _rank_with_claude(candidates, req):
         f'Reply ONLY with a JSON array of 5 objects with keys: '
         f'rank, name (verbatim), reason (1 sentence), match_pct (0-100).'
     )
-    text = _call_gemini(prompt)
+    text = _call_ai(prompt)
     m = re.search(r'\[.*?\]', text, re.DOTALL)
     if not m:
         raise ValueError('No JSON array in AI response')
@@ -392,7 +392,7 @@ def _lookup_nutrition(food_name: str) -> dict:
         '{"name":str,"unit":str,"serving_g":int,"protein_100":float,"carbs_100":float,"fat_100":float}\n'
         'Example: {"name":"Masala dosa","unit":"piece","serving_g":200,"protein_100":3.2,"carbs_100":28.5,"fat_100":5.1}'
     )
-    text = _call_gemini(prompt)
+    text = _call_ai(prompt)
     m = re.search(r'\{.*?\}', text, re.DOTALL)
     if not m:
         raise ValueError(f'No JSON in AI response: {text}')
@@ -606,7 +606,7 @@ def suggest(req: SuggestRequest):
     if not candidates:
         raise HTTPException(404, 'No matching foods found')
     try:
-        dishes = _rank_with_claude(candidates, req)
+        dishes = _rank_with_ai(candidates, req)
     except Exception:
         dishes = _rank_bm25_only(candidates)
     return SuggestResponse(dishes=dishes, candidates_found=len(candidates))

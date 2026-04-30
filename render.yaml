@@ -11,5 +11,5 @@ services:
         generateValue: true
       - key: DATABASE_URL
         sync: false          # set manually in Render dashboard (Neon connection string)
-      - key: ANTHROPIC_API_KEY
-        sync: false          # optional – enables AI ranking & food lookup
+      - key: GROQ_API_KEY
+        sync: false          # set in Render dashboard – enables AI food lookup (free at console.groq.com)
