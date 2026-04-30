@@ -522,8 +522,10 @@
       <div class="user-avatar" id="user-avatar">?</div>
       <span id="user-label">Account</span>
     </button>
+    <div id="sync-dot" title="Sync status" style="display:none;width:8px;height:8px;border-radius:50%;background:var(--text-dim);flex-shrink:0"></div>
   </div>
 </header>
+<div id="toast" style="display:none;position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#1e293b;color:#f1f5f9;padding:10px 18px;border-radius:8px;font-size:0.85rem;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,.4);max-width:320px;text-align:center"></div>
 
 <div class="date-nav">
   <button id="prev-day">&#8249;</button>
@@ -1106,28 +1108,71 @@ fetch('foods.json')
 function loadStore() {
   try { return JSON.parse(localStorage.getItem(storeKeyForUser())) || {}; } catch(e) { return {}; }
 }
+var _toastTimer = null;
+function showToast(msg, color) {
+  var el = document.getElementById('toast');
+  el.textContent = msg;
+  el.style.background = color || '#1e293b';
+  el.style.display = 'block';
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(function() { el.style.display = 'none'; }, 3500);
+}
+
+function setSyncDot(state) {
+  var dot = document.getElementById('sync-dot');
+  if (!AUTH_TOKEN) { dot.style.display = 'none'; return; }
+  dot.style.display = 'block';
+  if (state === 'syncing') { dot.style.background = '#f59e0b'; dot.title = 'Saving…'; }
+  else if (state === 'ok')  { dot.style.background = '#22c55e'; dot.title = 'Saved'; }
+  else                      { dot.style.background = '#ef4444'; dot.title = 'Sync failed'; }
+}
+
+function pushMealDate(date, attempt) {
+  if (!AUTH_TOKEN) return;
+  attempt = attempt || 1;
+  setSyncDot('syncing');
+  var entries = store.meals[date] || [];
+  fetch(API_BASE + '/api/meals/' + date, {
+    method: 'PUT', headers: authHeaders(),
+    body: JSON.stringify({ entries: entries })
+  })
+  .then(function(r) {
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    setSyncDot('ok');
+  })
+  .catch(function(err) {
+    console.error('Meal sync failed (attempt ' + attempt + '):', err);
+    if (attempt < 3) {
+      setTimeout(function() { pushMealDate(date, attempt + 1); }, 2000 * attempt);
+    } else {
+      setSyncDot('error');
+      showToast('⚠ Meal not saved to server – will retry on next action', '#dc2626');
+    }
+  });
+}
+
 function saveStore(changedDate) {
   localStorage.setItem(storeKeyForUser(), JSON.stringify(store));
-  if (AUTH_TOKEN && changedDate) {
-    var entries = store.meals[changedDate] || [];
-    fetch(API_BASE + '/api/meals/' + changedDate, {
-      method: 'PUT', headers: authHeaders(),
-      body: JSON.stringify({ entries: entries })
-    }).catch(function() {});
-  }
+  if (changedDate) pushMealDate(changedDate);
 }
 
 function syncMealsFromServer(callback) {
   if (!AUTH_TOKEN) { if (callback) callback(); return; }
   fetch(API_BASE + '/api/meals', { headers: authHeaders() })
-    .then(function(r) { return r.json(); })
+    .then(function(r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    })
     .then(function(serverMeals) {
       store.meals = serverMeals;
       localStorage.setItem(storeKeyForUser(), JSON.stringify(store));
       render();
       if (callback) callback();
     })
-    .catch(function() { if (callback) callback(); });
+    .catch(function(err) {
+      console.error('Meal fetch failed:', err);
+      if (callback) callback();
+    });
 }
 
 var store = loadStore();
