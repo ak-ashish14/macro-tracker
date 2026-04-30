@@ -9,8 +9,8 @@ POST /auth/login            returns JWT token
 GET  /auth/me               current user profile
 PUT  /auth/profile          update name/age/gender/weight/height
 PUT  /auth/password         change password
-POST /api/suggest           ingredient → FAISS → macro filter → Claude → top 5
-POST /api/lookup            food name → Claude macro estimate → add to FAISS index
+POST /api/suggest           ingredient → BM25 → macro filter → Claude → top 5
+POST /api/lookup            food name → Claude macro estimate → add to index
 """
 
 import json
@@ -18,14 +18,11 @@ import os
 import re
 import subprocess
 import sys
-import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import anthropic
-import faiss
-import numpy as np
 import psycopg2
 import psycopg2.extras
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -33,19 +30,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel
-from fastembed import TextEmbedding
+from rank_bm25 import BM25Okapi
 
 # ── Paths ─────────────────────────────────────────────────────────────────
-BASE       = os.path.dirname(__file__)
-INDEX_PATH = os.path.join(BASE, 'foods_index.faiss')
-META_PATH  = os.path.join(BASE, 'foods_meta.json')
-MODEL_NAME = 'all-MiniLM-L6-v2'
+BASE      = os.path.dirname(__file__)
+META_PATH = os.path.join(BASE, 'foods_meta.json')
 
 # ── Auth config ────────────────────────────────────────────────────────────
-SECRET_KEY     = os.environ.get('SECRET_KEY', 'macrotrack-dev-secret-change-me')
-ALGORITHM      = 'HS256'
+SECRET_KEY        = os.environ.get('SECRET_KEY', 'macrotrack-dev-secret-change-me')
+ALGORITHM         = 'HS256'
 TOKEN_EXPIRE_DAYS = 30
-DATABASE_URL   = os.environ.get('DATABASE_URL', '')
+DATABASE_URL      = os.environ.get('DATABASE_URL', '')
 
 pwd_ctx = CryptContext(schemes=['bcrypt'], deprecated='auto')
 
@@ -142,37 +137,66 @@ def _calc_suggested_goals(weight_kg, height_cm, age, gender) -> dict:
     else:
         bmr = 10 * weight_kg + 6.25 * height_cm - 5 * age + 5
     tdee = bmr * 1.55
-    protein = round(weight_kg * 1.6)   # 1.6 g/kg
-    fat     = round(tdee * 0.25 / 9)   # 25% of calories from fat
+    protein = round(weight_kg * 1.6)
+    fat     = round(tdee * 0.25 / 9)
     carbs   = round((tdee - protein * 4 - fat * 9) / 4)
     return {'protein': max(protein, 50), 'carbs': max(carbs, 50), 'fat': max(fat, 30)}
+
+
+# ── BM25 helpers ───────────────────────────────────────────────────────────
+
+def _tokenize(text: str) -> list[str]:
+    return re.sub(r'[^a-z0-9 ]', ' ', text.lower()).split()
+
+
+def _build_bm25(foods: list[dict]) -> BM25Okapi:
+    corpus = [_tokenize(f['n']) for f in foods]
+    return BM25Okapi(corpus)
+
+
+def _bm25_search(query: str, k: int = 30) -> list[dict]:
+    foods  = resources['foods']
+    bm25   = resources['bm25']
+    tokens = _tokenize(query)
+    scores = bm25.get_scores(tokens)
+    top_idx = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:k]
+    max_score = max(scores[top_idx[0]], 1e-9)
+    return [
+        {'food': foods[i], 'score': scores[i] / max_score}
+        for i in top_idx if scores[i] > 0
+    ]
+
+
+def _add_food_to_list(food: dict) -> None:
+    resources['foods'].append(food)
+    resources['bm25'] = _build_bm25(resources['foods'])
+    with open(META_PATH, 'w') as fh:
+        json.dump(resources['foods'], fh, separators=(',', ':'))
 
 
 # ── Lifespan ───────────────────────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    if not os.path.exists(INDEX_PATH) or not os.path.exists(META_PATH):
-        print("ERROR: FAISS index not found. Run  python build_index.py  first.", file=sys.stderr)
+    if not os.path.exists(META_PATH):
+        print("ERROR: foods_meta.json not found.", file=sys.stderr)
         sys.exit(1)
 
     _init_db()
 
-    print("Loading fastembed model …")
-    resources['model'] = TextEmbedding(MODEL_NAME)
-
-    print("Loading FAISS index …")
-    resources['index'] = faiss.read_index(INDEX_PATH)
-
     with open(META_PATH) as f:
-        resources['foods'] = json.load(f)
+        foods = json.load(f)
+    resources['foods'] = foods
+
+    print(f"Building BM25 index for {len(foods)} foods …")
+    resources['bm25'] = _build_bm25(foods)
 
     if os.environ.get('ANTHROPIC_API_KEY'):
         resources['anthropic'] = anthropic.Anthropic()
     else:
         resources['anthropic'] = None
     resources['claude_cli'] = os.environ.get('CLAUDE_CODE_EXECPATH', 'claude')
-    print(f"Ready – {resources['index'].ntotal} food vectors indexed.")
+    print(f"Ready – {len(foods)} foods indexed.")
     yield
     resources.clear()
 
@@ -272,24 +296,10 @@ def _call_claude(prompt: str, max_tokens: int = 1024) -> str:
     return result.stdout.strip()
 
 
-# ── FAISS helpers ──────────────────────────────────────────────────────────
+# ── Macro helpers ──────────────────────────────────────────────────────────
 
 def _kcal(food: dict) -> float:
     return food['up'] * 4 + food['uc'] * 4 + food['uf'] * 9
-
-
-def _embed_query(text: str) -> np.ndarray:
-    vec = np.array(list(resources['model'].embed([text])), dtype='float32')
-    faiss.normalize_L2(vec)
-    return vec
-
-
-def _faiss_search(query_vec: np.ndarray, k: int = 30):
-    D, I = resources['index'].search(query_vec, k)
-    return [
-        {'food': resources['foods'][idx], 'score': float(score)}
-        for score, idx in zip(D[0], I[0]) if idx >= 0
-    ]
 
 
 def _macro_fits(food: dict, req: SuggestRequest, tolerance: float = 1.3) -> bool:
@@ -312,7 +322,7 @@ def _filter_by_macros(candidates, req, target=15):
     return candidates[:target]
 
 
-def _rank_faiss_only(candidates):
+def _rank_bm25_only(candidates):
     return [{
         'rank': i, 'food': c['food']['n'], 'unit': c['food']['u'],
         'protein': c['food']['up'], 'carbs': c['food']['uc'], 'fat': c['food']['uf'],
@@ -381,21 +391,7 @@ def _lookup_nutrition(food_name: str) -> dict:
         'p': p100, 'c': c100, 'f': f100, 'k': k100,
         'up': round(p100*sg/100, 2), 'uc': round(c100*sg/100, 2),
         'uf': round(f100*sg/100, 2), 'uk': round(k100*sg/100, 1),
-        '_serving_g': sg,
     }
-
-
-def _add_food_to_index(food: dict) -> None:
-    kcal = round(food['up']*4 + food['uc']*4 + food['uf']*9, 1)
-    text = (f"{food['n']}. Served as 1 {food['u']}. Per serving: "
-            f"{food['up']}g protein, {food['uc']}g carbs, {food['uf']}g fat, {kcal} kcal.")
-    vec = np.array(list(resources['model'].embed([text])), dtype='float32')
-    faiss.normalize_L2(vec)
-    resources['index'].add(vec)
-    resources['foods'].append(food)
-    faiss.write_index(resources['index'], INDEX_PATH)
-    with open(META_PATH, 'w') as fh:
-        json.dump(resources['foods'], fh, separators=(',', ':'))
 
 
 # ── Auth Routes ────────────────────────────────────────────────────────────
@@ -542,7 +538,7 @@ def change_password(req: PasswordChange, user: dict = Depends(_get_user_from_tok
 def health():
     return {
         'status': 'ok',
-        'foods_indexed': resources.get('index') and resources['index'].ntotal,
+        'foods_indexed': len(resources.get('foods', [])),
         'db': bool(DATABASE_URL),
     }
 
@@ -551,15 +547,14 @@ def health():
 def suggest(req: SuggestRequest):
     if not req.ingredients.strip():
         raise HTTPException(400, 'ingredients must not be empty')
-    query_vec    = _embed_query(req.ingredients)
-    raw          = _faiss_search(query_vec, k=30)
-    candidates   = _filter_by_macros(raw, req, target=15)
+    raw        = _bm25_search(req.ingredients, k=30)
+    candidates = _filter_by_macros(raw, req, target=15)
     if not candidates:
         raise HTTPException(404, 'No matching foods found')
     try:
         dishes = _rank_with_claude(candidates, req)
     except Exception:
-        dishes = _rank_faiss_only(candidates)
+        dishes = _rank_bm25_only(candidates)
     return SuggestResponse(dishes=dishes, candidates_found=len(candidates))
 
 
@@ -582,7 +577,7 @@ def lookup(req: LookupRequest):
         food = _lookup_nutrition(req.food_name)
     except Exception as e:
         raise HTTPException(503, f'AI lookup failed: {e}')
-    _add_food_to_index(food)
+    _add_food_to_list(food)
     p100, c100, f100 = food['p'], food['c'], food['f']
     k100 = round(p100*4 + c100*4 + f100*9, 1)
     return LookupResponse(

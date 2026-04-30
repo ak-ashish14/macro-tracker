@@ -4,9 +4,7 @@ services:
     env: python
     plan: free
     rootDir: backend
-    buildCommand: >
-      pip install -r requirements.txt &&
-      python -c "from fastembed import TextEmbedding; list(TextEmbedding('sentence-transformers/all-MiniLM-L6-v2').embed(['warmup']))"
+    buildCommand: pip install -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: SECRET_KEY
