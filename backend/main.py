@@ -21,7 +21,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-import google.generativeai as genai
+from google import genai as google_genai
 import psycopg2
 import psycopg2.extras
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -205,8 +205,7 @@ async def lifespan(app: FastAPI):
 
     gemini_key = os.environ.get('GOOGLE_API_KEY')
     if gemini_key:
-        genai.configure(api_key=gemini_key)
-        resources['gemini'] = genai.GenerativeModel('gemini-1.5-flash')
+        resources['gemini'] = google_genai.Client(api_key=gemini_key)
         print("Gemini API ready.")
     else:
         resources['gemini'] = None
@@ -302,10 +301,13 @@ class LookupResponse(BaseModel):
 # ── AI helpers ─────────────────────────────────────────────────────────────
 
 def _call_gemini(prompt: str) -> str:
-    model = resources.get('gemini')
-    if model is None:
+    client = resources.get('gemini')
+    if client is None:
         raise RuntimeError('GOOGLE_API_KEY is not set. Add it in the Render dashboard under Environment Variables.')
-    response = model.generate_content(prompt)
+    response = client.models.generate_content(
+        model='gemini-2.0-flash',
+        contents=prompt,
+    )
     return response.text.strip()
 
 
