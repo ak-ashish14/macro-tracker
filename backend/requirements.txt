@@ -1,6 +1,6 @@
 fastapi
 uvicorn[standard]
-sentence-transformers
+fastembed
 faiss-cpu
 anthropic
 numpy

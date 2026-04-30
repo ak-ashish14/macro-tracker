@@ -33,7 +33,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel
-from sentence_transformers import SentenceTransformer
+from fastembed import TextEmbedding
 
 # ── Paths ─────────────────────────────────────────────────────────────────
 BASE       = os.path.dirname(__file__)
@@ -158,8 +158,8 @@ async def lifespan(app: FastAPI):
 
     _init_db()
 
-    print("Loading sentence-transformer model …")
-    resources['model'] = SentenceTransformer(MODEL_NAME)
+    print("Loading fastembed model …")
+    resources['model'] = TextEmbedding(MODEL_NAME)
 
     print("Loading FAISS index …")
     resources['index'] = faiss.read_index(INDEX_PATH)
@@ -279,7 +279,7 @@ def _kcal(food: dict) -> float:
 
 
 def _embed_query(text: str) -> np.ndarray:
-    vec = resources['model'].encode([text], convert_to_numpy=True).astype('float32')
+    vec = np.array(list(resources['model'].embed([text])), dtype='float32')
     faiss.normalize_L2(vec)
     return vec
 
@@ -389,7 +389,7 @@ def _add_food_to_index(food: dict) -> None:
     kcal = round(food['up']*4 + food['uc']*4 + food['uf']*9, 1)
     text = (f"{food['n']}. Served as 1 {food['u']}. Per serving: "
             f"{food['up']}g protein, {food['uc']}g carbs, {food['uf']}g fat, {kcal} kcal.")
-    vec = resources['model'].encode([text], convert_to_numpy=True).astype('float32')
+    vec = np.array(list(resources['model'].embed([text])), dtype='float32')
     faiss.normalize_L2(vec)
     resources['index'].add(vec)
     resources['foods'].append(food)
