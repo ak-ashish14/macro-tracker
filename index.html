@@ -65,21 +65,22 @@
     .calorie-strip {
       background: var(--surface); border: 1px solid var(--border);
       border-radius: var(--radius); padding: 20px 22px 16px;
-      margin-bottom: 24px; display: flex; align-items: center; gap: 24px; flex-wrap: wrap;
+      margin-bottom: 24px; display: flex; align-items: center; gap: 20px;
     }
-    .gauge-wrap { position: relative; width: 160px; height: 100px; flex-shrink: 0; margin: 0 auto; }
-    .gauge-wrap svg { width: 160px; height: 100px; overflow: visible; }
-    .gauge-center-text { position: absolute; bottom: 2px; left: 50%; transform: translateX(-50%); text-align: center; pointer-events: none; }
-    .gauge-kcal-val { font-size: 1.5rem; font-weight: 800; line-height: 1; white-space: nowrap; }
-    .gauge-kcal-sub { font-size: 0.65rem; color: var(--text-dim); white-space: nowrap; }
-    .gauge-labels { display: flex; flex-direction: column; gap: 10px; flex: 1; min-width: 140px; }
-    .gauge-row { display: flex; justify-content: space-between; align-items: center; }
-    .gauge-stat-label { font-size: 0.68rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.07em; font-weight: 600; }
-    .gauge-stat-val { font-size: 1.05rem; font-weight: 800; }
+    .gauge-wrap { flex: 0 0 42%; max-width: 200px; min-width: 120px; }
+    .gauge-wrap svg { width: 100%; height: auto; display: block; }
+    .gauge-labels { flex: 1; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+    .gauge-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .gauge-stat-label { font-size: 0.65rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.07em; font-weight: 600; white-space: nowrap; }
+    .gauge-stat-val { font-size: 1rem; font-weight: 800; white-space: nowrap; }
     .gauge-divider { height: 1px; background: var(--border); }
-    .gauge-meals-row { display: flex; justify-content: space-between; align-items: center; padding-top: 4px; }
-    .gauge-meals-label { font-size: 0.68rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.07em; font-weight: 600; }
-    .gauge-meals-val { font-size: 1.05rem; font-weight: 800; }
+    .gauge-meals-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .gauge-meals-label { font-size: 0.65rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.07em; font-weight: 600; }
+    .gauge-meals-val { font-size: 1rem; font-weight: 800; }
+    @media (max-width: 480px) {
+      .calorie-strip { flex-direction: column; }
+      .gauge-wrap { flex: none; width: 60%; max-width: 180px; margin: 0 auto; }
+    }
 
     /* ── Macro card overshoot ── */
     .macro-card.overshoot { border-color: rgba(248,113,113,.45); background: rgba(248,113,113,.06); }
@@ -556,11 +557,7 @@
 <main>
   <div class="calorie-strip" style="margin-top:20px">
     <div class="gauge-wrap">
-      <svg viewBox="0 0 160 100" id="gauge-svg"></svg>
-      <div class="gauge-center-text">
-        <div class="gauge-kcal-val" id="t-kcal">0</div>
-        <div class="gauge-kcal-sub">kcal consumed</div>
-      </div>
+      <svg viewBox="0 0 200 140" id="gauge-svg" preserveAspectRatio="xMidYMid meet"></svg>
     </div>
     <div class="gauge-labels">
       <div class="gauge-row">
@@ -1258,7 +1255,7 @@ function render() {
   var goalKcal  = Math.round(g.protein * 4 + g.carbs * 4 + g.fat * 9);
   var remKcal   = goalKcal - totalKcal;
 
-  document.getElementById('t-kcal').textContent = totalKcal;
+  // t-kcal value is rendered inside SVG by renderGauge()
   document.getElementById('t-meals').textContent = meals.length;
   document.getElementById('t-goal-kcal').textContent = goalKcal + ' kcal';
   var remEl = document.getElementById('t-remaining');
@@ -1345,86 +1342,128 @@ function renderMacro(id, consumed, goal, kcalPer) {
 }
 
 function renderGauge(consumed, goal) {
+  /*
+   * ViewBox: 0 0 200 140
+   * Gauge is a speedometer arc: 8-o'clock → over the top → 4-o'clock
+   * In SVG angles (0=right, 90=down, 180=left, 270=up):
+   *   8-o'clock = 150°,  4-o'clock = 30°
+   *   Clockwise sweep from 150° → 180° → 270° → 0° → 30° = 240°
+   * Centre: (100, 105)  Radius: 76
+   * Start (150°): x=100+76*cos(150°)=100-65.8=34.2, y=105+76*sin(150°)=105+38=143  ✓ ≤140? barely
+   * Let's use cy=100, R=72:
+   *   Start/end y = 100+72*sin(150°)=100+36=136 ✓
+   *   Top y       = 100-72 = 28                 ✓
+   */
   var svg = document.getElementById('gauge-svg');
-  // Arc geometry: 200° sweep, centre (80,90), radius 72
-  var cx = 80, cy = 90, R = 72, sweep = 200;
-  var startDeg = 180 + (180 - sweep) / 2;   // 170° (bottom-left)
-  var endDeg   = startDeg + sweep;           // 370° (bottom-right)
+  var cx = 100, cy = 100, R = 72;
+  // SVG angles (degrees, 0=right, clockwise positive)
+  var startA = 150, endA = 30; // 8-o'clock to 4-o'clock, 240° clockwise
 
-  function polar(deg, r) {
-    var rad = (deg - 90) * Math.PI / 180;
-    return [(cx + r * Math.cos(rad)).toFixed(2), (cy + r * Math.sin(rad)).toFixed(2)];
-  }
-  function arcPath(r, fromDeg, toDeg, large) {
-    var s = polar(fromDeg, r), e = polar(toDeg, r);
-    return 'M ' + s[0] + ' ' + s[1] + ' A ' + r + ' ' + r + ' 0 ' + (large ? 1 : 0) + ' 1 ' + e[0] + ' ' + e[1];
+  function pt(angleDeg, r) {
+    var rad = angleDeg * Math.PI / 180;
+    return { x: +(cx + r * Math.cos(rad)).toFixed(2),
+             y: +(cy + r * Math.sin(rad)).toFixed(2) };
   }
 
-  var ratio      = goal > 0 ? consumed / goal : 0;
-  var cappedRatio = Math.min(ratio, 1.25);   // gauge shows up to 125%
-  var fillDeg    = startDeg + cappedRatio * sweep;
-  var over       = ratio > 1;
+  // SVG arc path clockwise from a to b (both in SVG degrees)
+  function arc(r, a, b) {
+    var p1 = pt(a, r), p2 = pt(b, r);
+    // clockwise angular distance from a to b
+    var span = ((b - a) + 360) % 360;
+    var large = span > 180 ? 1 : 0;
+    return ['M', p1.x, p1.y, 'A', r, r, 0, large, 1, p2.x, p2.y].join(' ');
+  }
 
-  // Zone colours along the arc (good → great → optimal → overshoot)
+  // Total sweep = 240° clockwise from startA
+  var totalSweep = 240;
+  // Gauge max = 125% of goal; map ratio → angle
+  var ratio     = goal > 0 ? consumed / goal : 0;
+  var capped    = Math.min(ratio, 1.25);
+  var over      = ratio > 1;
+  // Needle angle (clockwise from startA)
+  var needleOff = capped * (totalSweep / 1.25); // 0→0°, 1.0→192°, 1.25→240°
+  var needleA   = startA + needleOff;
+
+  // Zone boundaries (ratio → SVG angle)
+  function ratioToA(r) { return startA + Math.min(r, 1.25) * (totalSweep / 1.25); }
+
   var zones = [
-    { end: 0.5,  color: '#6c63ff' },  // 0–50%  purple
-    { end: 0.75, color: '#38bdf8' },  // 50–75% blue
-    { end: 1.0,  color: '#22c55e' },  // 75–100% green
-    { end: 1.25, color: '#ef4444' },  // 100–125% red (overshoot)
-  ];
-  var zoneLabels = [
-    { deg: startDeg + 0.12 * sweep, label: 'LOW' },
-    { deg: startDeg + 0.35 * sweep, label: 'GOOD' },
-    { deg: startDeg + 0.63 * sweep, label: 'GREAT' },
-    { deg: startDeg + 0.88 * sweep, label: 'OPTIMAL' },
-    { deg: startDeg + 1.10 * sweep, label: 'OVER' },
+    { from: 0,    to: 0.5,  color: '#6c63ff' },
+    { from: 0.5,  to: 0.75, color: '#38bdf8' },
+    { from: 0.75, to: 1.0,  color: '#22c55e' },
+    { from: 1.0,  to: 1.25, color: '#ef4444' },
   ];
 
-  var html = '';
-  // Track background (full arc, grey)
-  html += '<path d="' + arcPath(R, startDeg, endDeg, 1) + '" fill="none" stroke="#2a2a3a" stroke-width="14" stroke-linecap="round"/>';
+  var fillColor = over ? '#ef4444'
+                : ratio > 0.75 ? '#22c55e'
+                : ratio > 0.5  ? '#38bdf8' : '#6c63ff';
 
-  // Coloured zone segments on track
-  var prevDeg = startDeg;
+  var h = '';
+
+  // 1. Track background
+  h += '<path d="' + arc(R, startA, endA) + '" fill="none" stroke="#252535" stroke-width="13" stroke-linecap="round"/>';
+
+  // 2. Dimmed zone bands
   zones.forEach(function(z) {
-    var zEndDeg = startDeg + z.end * sweep;
-    var large = (zEndDeg - prevDeg) > 180 ? 1 : 0;
-    html += '<path d="' + arcPath(R, prevDeg, zEndDeg, large) + '" fill="none" stroke="' + z.color + '" stroke-width="14" stroke-linecap="butt" opacity="0.18"/>';
-    prevDeg = zEndDeg;
+    h += '<path d="' + arc(R, ratioToA(z.from), ratioToA(z.to)) +
+         '" fill="none" stroke="' + z.color + '" stroke-width="13" stroke-linecap="butt" opacity="0.2"/>';
   });
 
-  // Fill arc
-  if (ratio > 0) {
-    var fillColor = over ? '#ef4444' : (ratio > 0.75 ? '#22c55e' : ratio > 0.5 ? '#38bdf8' : '#6c63ff');
-    var fillLarge = (fillDeg - startDeg) > 180 ? 1 : 0;
-    html += '<path d="' + arcPath(R, startDeg, fillDeg, fillLarge) + '" fill="none" stroke="' + fillColor + '" stroke-width="14" stroke-linecap="round" style="filter:drop-shadow(0 0 5px ' + fillColor + '66)"/>';
+  // 3. Live fill arc
+  if (ratio > 0.005) {
+    h += '<path d="' + arc(R, startA, needleA) +
+         '" fill="none" stroke="' + fillColor + '" stroke-width="13" stroke-linecap="round"' +
+         ' style="filter:drop-shadow(0 0 4px ' + fillColor + '99)"/>';
   }
 
-  // Tick marks at zone boundaries
-  [0, 0.5, 0.75, 1.0].forEach(function(t) {
-    var td = startDeg + t * sweep;
-    var inner = polar(td, R - 10), outer = polar(td, R + 4);
-    html += '<line x1="' + inner[0] + '" y1="' + inner[1] + '" x2="' + outer[0] + '" y2="' + outer[1] + '" stroke="#444" stroke-width="1.5"/>';
+  // 4. Tick marks at zone edges
+  [0, 0.5, 0.75, 1.0, 1.25].forEach(function(r) {
+    var a = ratioToA(r), inner = pt(a, R - 8), outer = pt(a, R + 6);
+    h += '<line x1="' + inner.x + '" y1="' + inner.y +
+         '" x2="' + outer.x + '" y2="' + outer.y +
+         '" stroke="#555" stroke-width="1.5" stroke-linecap="round"/>';
   });
 
-  // Zone labels
-  zoneLabels.forEach(function(z) {
-    var p = polar(z.deg, R + 18);
-    html += '<text x="' + p[0] + '" y="' + p[1] + '" text-anchor="middle" dominant-baseline="middle" font-size="6" font-weight="700" fill="#666" font-family="inherit" letter-spacing="0.5">' + z.label + '</text>';
+  // 5. Zone labels (inside track, at R-22)
+  var labelR = R - 22;
+  [
+    { r: 0.2,   t: 'LOW'  },
+    { r: 0.625, t: 'GOOD' },
+    { r: 0.875, t: 'GREAT'},
+    { r: 1.125, t: 'OVER' },
+  ].forEach(function(z) {
+    var p = pt(ratioToA(z.r), labelR);
+    h += '<text x="' + p.x + '" y="' + p.y +
+         '" text-anchor="middle" dominant-baseline="middle"' +
+         ' font-size="7" font-weight="700" fill="#555" letter-spacing="0.3">' + z.t + '</text>';
   });
 
-  // Needle
-  var needleDeg = Math.min(fillDeg, startDeg + 1.25 * sweep);
-  var nTip = polar(needleDeg, R - 6), nBase1 = polar(needleDeg - 90, 6), nBase2 = polar(needleDeg + 90, 6);
-  var needleColor = over ? '#ef4444' : '#f1f5f9';
-  html += '<polygon points="' + nTip[0] + ',' + nTip[1] + ' ' + nBase1[0] + ',' + nBase1[1] + ' ' + cx + ',' + cy + ' ' + nBase2[0] + ',' + nBase2[1] + '" fill="' + needleColor + '" opacity="0.9"/>';
-  html += '<circle cx="' + cx + '" cy="' + cy + '" r="5" fill="#1e1e2e" stroke="' + needleColor + '" stroke-width="2"/>';
+  // 6. Needle (line from centre to near arc)
+  var nTip  = pt(needleA, R - 4);
+  var nBase = pt(needleA + 180, 10); // opposite side for base width
+  var nL    = pt(needleA - 90, 4), nR = pt(needleA + 90, 4);
+  var nColor = over ? '#ef4444' : '#e2e8f0';
+  h += '<polygon points="' + nTip.x + ',' + nTip.y + ' ' +
+       nL.x + ',' + nL.y + ' ' + cx + ',' + cy + ' ' +
+       nR.x + ',' + nR.y + '" fill="' + nColor + '" opacity="0.95"/>';
+  h += '<circle cx="' + cx + '" cy="' + cy + '" r="6" fill="#12121f" stroke="' + nColor + '" stroke-width="2"/>';
 
-  svg.innerHTML = html;
+  // 7. Centre text — all inside SVG so it scales with viewBox
+  var valColor  = over ? '#ef4444' : '#f1f5f9';
+  var zoneLabel = over ? 'OVER TARGET'
+                : ratio > 0.75 ? 'ON TRACK'
+                : ratio > 0.4  ? 'GOOD'
+                : ratio > 0    ? 'LOW' : '';
+  h += '<text x="' + cx + '" y="' + (cy + 16) +
+       '" text-anchor="middle" font-size="22" font-weight="800" fill="' + valColor + '">' + consumed + '</text>';
+  h += '<text x="' + cx + '" y="' + (cy + 30) +
+       '" text-anchor="middle" font-size="7.5" font-weight="600" fill="#888">KCAL CONSUMED</text>';
+  if (zoneLabel) {
+    h += '<text x="' + cx + '" y="' + (cy + 42) +
+         '" text-anchor="middle" font-size="7" font-weight="700" fill="' + valColor + '" opacity="0.8">' + zoneLabel + '</text>';
+  }
 
-  // Centre text colour
-  var kcalEl = document.getElementById('t-kcal');
-  kcalEl.style.color = over ? 'var(--red)' : 'var(--text)';
+  svg.innerHTML = h;
 }
 
 function fmtG(v) {
