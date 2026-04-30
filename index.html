@@ -61,12 +61,32 @@
       text-transform: uppercase; color: var(--text-dim); margin-bottom: 12px;
     }
 
-    .totals-strip {
+    /* ── Calorie gauge card ── */
+    .calorie-strip {
       background: var(--surface); border: 1px solid var(--border);
-      border-radius: var(--radius); padding: 16px 22px;
-      display: flex; align-items: center; gap: 28px;
-      margin-bottom: 24px; flex-wrap: wrap;
+      border-radius: var(--radius); padding: 20px 22px 16px;
+      margin-bottom: 24px; display: flex; align-items: center; gap: 24px; flex-wrap: wrap;
     }
+    .gauge-wrap { position: relative; width: 160px; height: 100px; flex-shrink: 0; margin: 0 auto; }
+    .gauge-wrap svg { width: 160px; height: 100px; overflow: visible; }
+    .gauge-center-text { position: absolute; bottom: 2px; left: 50%; transform: translateX(-50%); text-align: center; pointer-events: none; }
+    .gauge-kcal-val { font-size: 1.5rem; font-weight: 800; line-height: 1; white-space: nowrap; }
+    .gauge-kcal-sub { font-size: 0.65rem; color: var(--text-dim); white-space: nowrap; }
+    .gauge-labels { display: flex; flex-direction: column; gap: 10px; flex: 1; min-width: 140px; }
+    .gauge-row { display: flex; justify-content: space-between; align-items: center; }
+    .gauge-stat-label { font-size: 0.68rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.07em; font-weight: 600; }
+    .gauge-stat-val { font-size: 1.05rem; font-weight: 800; }
+    .gauge-divider { height: 1px; background: var(--border); }
+    .gauge-meals-row { display: flex; justify-content: space-between; align-items: center; padding-top: 4px; }
+    .gauge-meals-label { font-size: 0.68rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.07em; font-weight: 600; }
+    .gauge-meals-val { font-size: 1.05rem; font-weight: 800; }
+
+    /* ── Macro card overshoot ── */
+    .macro-card.overshoot { border-color: rgba(248,113,113,.45); background: rgba(248,113,113,.06); }
+    .macro-card.overshoot::before { background: var(--red); }
+    .macro-pct.overshoot { background: rgba(248,113,113,.18); color: var(--red); }
+    .progress-fill.overshoot { background: var(--red); }
+
     .total-item { display: flex; flex-direction: column; gap: 3px; }
     .total-label { font-size: 0.68rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.07em; font-weight: 600; }
     .total-val { font-size: 1.15rem; font-weight: 800; }
@@ -534,20 +554,29 @@
 </div>
 
 <main>
-  <div class="totals-strip" style="margin-top:20px">
-    <div class="total-item">
-      <div class="total-label">Total Calories</div>
-      <div class="total-val" id="t-kcal" style="color:var(--accent2)">0 kcal</div>
+  <div class="calorie-strip" style="margin-top:20px">
+    <div class="gauge-wrap">
+      <svg viewBox="0 0 160 100" id="gauge-svg"></svg>
+      <div class="gauge-center-text">
+        <div class="gauge-kcal-val" id="t-kcal">0</div>
+        <div class="gauge-kcal-sub">kcal consumed</div>
+      </div>
     </div>
-    <div class="strip-div"></div>
-    <div class="total-item">
-      <div class="total-label">Meals Logged</div>
-      <div class="total-val" id="t-meals">0</div>
-    </div>
-    <div class="strip-div"></div>
-    <div class="total-item">
-      <div class="total-label">Remaining</div>
-      <div class="total-val" id="t-remaining" style="color:var(--carbs-color)">&#8212; kcal</div>
+    <div class="gauge-labels">
+      <div class="gauge-row">
+        <div class="gauge-stat-label">Target Calorie</div>
+        <div class="gauge-stat-val" id="t-goal-kcal" style="color:var(--text-dim)">— kcal</div>
+      </div>
+      <div class="gauge-divider"></div>
+      <div class="gauge-row">
+        <div class="gauge-stat-label">Remaining Calorie</div>
+        <div class="gauge-stat-val" id="t-remaining">— kcal</div>
+      </div>
+      <div class="gauge-divider"></div>
+      <div class="gauge-meals-row">
+        <div class="gauge-meals-label">Meals Logged</div>
+        <div class="gauge-meals-val" id="t-meals">0</div>
+      </div>
     </div>
   </div>
 
@@ -1229,16 +1258,18 @@ function render() {
   var goalKcal  = Math.round(g.protein * 4 + g.carbs * 4 + g.fat * 9);
   var remKcal   = goalKcal - totalKcal;
 
-  document.getElementById('t-kcal').textContent = totalKcal + ' kcal';
+  document.getElementById('t-kcal').textContent = totalKcal;
   document.getElementById('t-meals').textContent = meals.length;
+  document.getElementById('t-goal-kcal').textContent = goalKcal + ' kcal';
   var remEl = document.getElementById('t-remaining');
   if (remKcal >= 0) {
     remEl.textContent = remKcal + ' kcal';
     remEl.style.color = 'var(--carbs-color)';
   } else {
-    remEl.textContent = Math.abs(remKcal) + ' kcal over';
+    remEl.textContent = Math.abs(remKcal) + ' kcal over!';
     remEl.style.color = 'var(--red)';
   }
+  renderGauge(totalKcal, goalKcal);
 
   renderMacro('p', tp, g.protein, 4);
   renderMacro('c', tc, g.carbs, 4);
@@ -1289,11 +1320,111 @@ function render() {
 }
 
 function renderMacro(id, consumed, goal, kcalPer) {
-  var pct = goal > 0 ? Math.min(consumed / goal, 1) * 100 : 0;
+  var raw   = goal > 0 ? consumed / goal : 0;
+  var over  = raw > 1;
+  var barPct = Math.min(raw, 1) * 100;
+  var pctLabel = over ? '+' + Math.round((raw - 1) * 100) + '% over!' : Math.round(raw * 100) + '%';
+  var card  = document.getElementById(id + '-val').closest('.macro-card');
+  var pctEl = document.getElementById(id + '-pct');
+  var barEl = document.getElementById(id + '-bar');
+
   document.getElementById(id + '-val').textContent = fmtG(consumed);
-  document.getElementById(id + '-bar').style.width = pct + '%';
-  document.getElementById(id + '-pct').textContent = Math.round(pct) + '%';
+  barEl.style.width = barPct + '%';
+  pctEl.textContent = pctLabel;
   document.getElementById(id + '-kcal').textContent = Math.round(consumed * kcalPer) + ' kcal';
+
+  if (over) {
+    card.classList.add('overshoot');
+    pctEl.classList.add('overshoot');
+    barEl.classList.add('overshoot');
+  } else {
+    card.classList.remove('overshoot');
+    pctEl.classList.remove('overshoot');
+    barEl.classList.remove('overshoot');
+  }
+}
+
+function renderGauge(consumed, goal) {
+  var svg = document.getElementById('gauge-svg');
+  // Arc geometry: 200° sweep, centre (80,90), radius 72
+  var cx = 80, cy = 90, R = 72, sweep = 200;
+  var startDeg = 180 + (180 - sweep) / 2;   // 170° (bottom-left)
+  var endDeg   = startDeg + sweep;           // 370° (bottom-right)
+
+  function polar(deg, r) {
+    var rad = (deg - 90) * Math.PI / 180;
+    return [(cx + r * Math.cos(rad)).toFixed(2), (cy + r * Math.sin(rad)).toFixed(2)];
+  }
+  function arcPath(r, fromDeg, toDeg, large) {
+    var s = polar(fromDeg, r), e = polar(toDeg, r);
+    return 'M ' + s[0] + ' ' + s[1] + ' A ' + r + ' ' + r + ' 0 ' + (large ? 1 : 0) + ' 1 ' + e[0] + ' ' + e[1];
+  }
+
+  var ratio      = goal > 0 ? consumed / goal : 0;
+  var cappedRatio = Math.min(ratio, 1.25);   // gauge shows up to 125%
+  var fillDeg    = startDeg + cappedRatio * sweep;
+  var over       = ratio > 1;
+
+  // Zone colours along the arc (good → great → optimal → overshoot)
+  var zones = [
+    { end: 0.5,  color: '#6c63ff' },  // 0–50%  purple
+    { end: 0.75, color: '#38bdf8' },  // 50–75% blue
+    { end: 1.0,  color: '#22c55e' },  // 75–100% green
+    { end: 1.25, color: '#ef4444' },  // 100–125% red (overshoot)
+  ];
+  var zoneLabels = [
+    { deg: startDeg + 0.12 * sweep, label: 'LOW' },
+    { deg: startDeg + 0.35 * sweep, label: 'GOOD' },
+    { deg: startDeg + 0.63 * sweep, label: 'GREAT' },
+    { deg: startDeg + 0.88 * sweep, label: 'OPTIMAL' },
+    { deg: startDeg + 1.10 * sweep, label: 'OVER' },
+  ];
+
+  var html = '';
+  // Track background (full arc, grey)
+  html += '<path d="' + arcPath(R, startDeg, endDeg, 1) + '" fill="none" stroke="#2a2a3a" stroke-width="14" stroke-linecap="round"/>';
+
+  // Coloured zone segments on track
+  var prevDeg = startDeg;
+  zones.forEach(function(z) {
+    var zEndDeg = startDeg + z.end * sweep;
+    var large = (zEndDeg - prevDeg) > 180 ? 1 : 0;
+    html += '<path d="' + arcPath(R, prevDeg, zEndDeg, large) + '" fill="none" stroke="' + z.color + '" stroke-width="14" stroke-linecap="butt" opacity="0.18"/>';
+    prevDeg = zEndDeg;
+  });
+
+  // Fill arc
+  if (ratio > 0) {
+    var fillColor = over ? '#ef4444' : (ratio > 0.75 ? '#22c55e' : ratio > 0.5 ? '#38bdf8' : '#6c63ff');
+    var fillLarge = (fillDeg - startDeg) > 180 ? 1 : 0;
+    html += '<path d="' + arcPath(R, startDeg, fillDeg, fillLarge) + '" fill="none" stroke="' + fillColor + '" stroke-width="14" stroke-linecap="round" style="filter:drop-shadow(0 0 5px ' + fillColor + '66)"/>';
+  }
+
+  // Tick marks at zone boundaries
+  [0, 0.5, 0.75, 1.0].forEach(function(t) {
+    var td = startDeg + t * sweep;
+    var inner = polar(td, R - 10), outer = polar(td, R + 4);
+    html += '<line x1="' + inner[0] + '" y1="' + inner[1] + '" x2="' + outer[0] + '" y2="' + outer[1] + '" stroke="#444" stroke-width="1.5"/>';
+  });
+
+  // Zone labels
+  zoneLabels.forEach(function(z) {
+    var p = polar(z.deg, R + 18);
+    html += '<text x="' + p[0] + '" y="' + p[1] + '" text-anchor="middle" dominant-baseline="middle" font-size="6" font-weight="700" fill="#666" font-family="inherit" letter-spacing="0.5">' + z.label + '</text>';
+  });
+
+  // Needle
+  var needleDeg = Math.min(fillDeg, startDeg + 1.25 * sweep);
+  var nTip = polar(needleDeg, R - 6), nBase1 = polar(needleDeg - 90, 6), nBase2 = polar(needleDeg + 90, 6);
+  var needleColor = over ? '#ef4444' : '#f1f5f9';
+  html += '<polygon points="' + nTip[0] + ',' + nTip[1] + ' ' + nBase1[0] + ',' + nBase1[1] + ' ' + cx + ',' + cy + ' ' + nBase2[0] + ',' + nBase2[1] + '" fill="' + needleColor + '" opacity="0.9"/>';
+  html += '<circle cx="' + cx + '" cy="' + cy + '" r="5" fill="#1e1e2e" stroke="' + needleColor + '" stroke-width="2"/>';
+
+  svg.innerHTML = html;
+
+  // Centre text colour
+  var kcalEl = document.getElementById('t-kcal');
+  kcalEl.style.color = over ? 'var(--red)' : 'var(--text)';
 }
 
 function fmtG(v) {
