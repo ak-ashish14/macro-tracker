@@ -21,7 +21,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from google import genai as google_genai
+from groq import Groq
 import psycopg2
 import psycopg2.extras
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -203,13 +203,13 @@ async def lifespan(app: FastAPI):
     print(f"Building BM25 index for {len(foods)} foods …")
     resources['bm25'] = _build_bm25(foods)
 
-    gemini_key = os.environ.get('GOOGLE_API_KEY')
-    if gemini_key:
-        resources['gemini'] = google_genai.Client(api_key=gemini_key)
-        print("Gemini API ready.")
+    groq_key = os.environ.get('GROQ_API_KEY')
+    if groq_key:
+        resources['groq'] = Groq(api_key=groq_key)
+        print("Groq API ready.")
     else:
-        resources['gemini'] = None
-        print("WARNING: GOOGLE_API_KEY not set – AI food lookup disabled.", file=sys.stderr)
+        resources['groq'] = None
+        print("WARNING: GROQ_API_KEY not set – AI food lookup disabled.", file=sys.stderr)
     print(f"Ready – {len(foods)} foods indexed.")
     yield
     resources.clear()
@@ -301,14 +301,15 @@ class LookupResponse(BaseModel):
 # ── AI helpers ─────────────────────────────────────────────────────────────
 
 def _call_gemini(prompt: str) -> str:
-    client = resources.get('gemini')
+    client = resources.get('groq')
     if client is None:
-        raise RuntimeError('GOOGLE_API_KEY is not set. Add it in the Render dashboard under Environment Variables.')
-    response = client.models.generate_content(
-        model='gemini-2.0-flash',
-        contents=prompt,
+        raise RuntimeError('GROQ_API_KEY is not set. Add it in the Render dashboard under Environment Variables.')
+    resp = client.chat.completions.create(
+        model='llama-3.1-8b-instant',
+        messages=[{'role': 'user', 'content': prompt}],
+        max_tokens=512,
     )
-    return response.text.strip()
+    return resp.choices[0].message.content.strip()
 
 
 # ── Macro helpers ──────────────────────────────────────────────────────────
