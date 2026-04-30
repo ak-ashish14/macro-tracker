@@ -16,7 +16,6 @@ POST /api/lookup            food name → Claude macro estimate → add to index
 import json
 import os
 import re
-import subprocess
 import sys
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -206,9 +205,10 @@ async def lifespan(app: FastAPI):
 
     if os.environ.get('ANTHROPIC_API_KEY'):
         resources['anthropic'] = anthropic.Anthropic()
+        print("Anthropic API ready.")
     else:
         resources['anthropic'] = None
-    resources['claude_cli'] = os.environ.get('CLAUDE_CODE_EXECPATH', 'claude')
+        print("WARNING: ANTHROPIC_API_KEY not set – AI food lookup disabled.", file=sys.stderr)
     print(f"Ready – {len(foods)} foods indexed.")
     yield
     resources.clear()
@@ -301,20 +301,13 @@ class LookupResponse(BaseModel):
 
 def _call_claude(prompt: str, max_tokens: int = 1024) -> str:
     client = resources.get('anthropic')
-    if client is not None:
-        msg = client.messages.create(
-            model='claude-sonnet-4-6', max_tokens=max_tokens,
-            messages=[{'role': 'user', 'content': prompt}],
-        )
-        return msg.content[0].text.strip()
-    cli = resources.get('claude_cli', 'claude')
-    result = subprocess.run(
-        [cli, '--print', '--output-format', 'text'],
-        input=prompt, capture_output=True, text=True, timeout=60,
+    if client is None:
+        raise RuntimeError('ANTHROPIC_API_KEY is not set. Add it in the Render dashboard under Environment Variables.')
+    msg = client.messages.create(
+        model='claude-sonnet-4-6', max_tokens=max_tokens,
+        messages=[{'role': 'user', 'content': prompt}],
     )
-    if result.returncode != 0:
-        raise RuntimeError(f'Claude CLI error: {result.stderr.strip()}')
-    return result.stdout.strip()
+    return msg.content[0].text.strip()
 
 
 # ── Macro helpers ──────────────────────────────────────────────────────────
