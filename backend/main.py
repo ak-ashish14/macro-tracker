@@ -51,7 +51,12 @@ resources: dict = {}
 # ── Database helpers ───────────────────────────────────────────────────────
 
 def _db() -> psycopg2.extensions.connection:
-    return psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
+    # Neon (and most cloud PG) require SSL; add sslmode if not already in URL
+    url = DATABASE_URL
+    if url and 'sslmode' not in url:
+        sep = '&' if '?' in url else '?'
+        url = url + sep + 'sslmode=require'
+    return psycopg2.connect(url, cursor_factory=psycopg2.extras.RealDictCursor)
 
 
 def _init_db() -> None:
@@ -209,6 +214,14 @@ app.add_middleware(
     allow_methods=['*'],
     allow_headers=['*'],
 )
+
+from fastapi import Request
+from fastapi.responses import JSONResponse
+
+@app.exception_handler(Exception)
+async def _global_exc(request: Request, exc: Exception):
+    print(f"Unhandled error on {request.url}: {exc}", file=sys.stderr)
+    return JSONResponse(status_code=500, content={'detail': str(exc)})
 
 
 # ── Auth Schemas ───────────────────────────────────────────────────────────

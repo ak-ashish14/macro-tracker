@@ -925,15 +925,20 @@ document.getElementById('btn-reg-submit').onclick = function() {
       height_cm: parseFloat(document.getElementById('reg-height').value) || null,
     }),
   })
-  .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, d: d }; }); })
+  .then(function(r) {
+    return r.text().then(function(t) {
+      try { return { ok: r.ok, d: JSON.parse(t) }; }
+      catch(_) { return { ok: false, d: { detail: t || ('HTTP ' + r.status) } }; }
+    });
+  })
   .then(function(res) {
     btn.disabled = false; btn.textContent = 'Create Account';
     if (!res.ok) { setAuthError('reg-error', res.d.detail || 'Registration failed'); return; }
     onAuthSuccess(res.d);
   })
-  .catch(function() {
+  .catch(function(err) {
     btn.disabled = false; btn.textContent = 'Create Account';
-    setAuthError('reg-error', 'Server unreachable');
+    setAuthError('reg-error', 'Network error – ' + (err.message || 'check connection'));
   });
 };
 
