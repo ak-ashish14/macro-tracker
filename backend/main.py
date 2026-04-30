@@ -21,7 +21,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-import anthropic
+import google.generativeai as genai
 import psycopg2
 import psycopg2.extras
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -203,12 +203,14 @@ async def lifespan(app: FastAPI):
     print(f"Building BM25 index for {len(foods)} foods …")
     resources['bm25'] = _build_bm25(foods)
 
-    if os.environ.get('ANTHROPIC_API_KEY'):
-        resources['anthropic'] = anthropic.Anthropic()
-        print("Anthropic API ready.")
+    gemini_key = os.environ.get('GOOGLE_API_KEY')
+    if gemini_key:
+        genai.configure(api_key=gemini_key)
+        resources['gemini'] = genai.GenerativeModel('gemini-1.5-flash')
+        print("Gemini API ready.")
     else:
-        resources['anthropic'] = None
-        print("WARNING: ANTHROPIC_API_KEY not set – AI food lookup disabled.", file=sys.stderr)
+        resources['gemini'] = None
+        print("WARNING: GOOGLE_API_KEY not set – AI food lookup disabled.", file=sys.stderr)
     print(f"Ready – {len(foods)} foods indexed.")
     yield
     resources.clear()
@@ -297,17 +299,14 @@ class LookupResponse(BaseModel):
     source: str
 
 
-# ── Claude helpers ─────────────────────────────────────────────────────────
+# ── AI helpers ─────────────────────────────────────────────────────────────
 
-def _call_claude(prompt: str, max_tokens: int = 1024) -> str:
-    client = resources.get('anthropic')
-    if client is None:
-        raise RuntimeError('ANTHROPIC_API_KEY is not set. Add it in the Render dashboard under Environment Variables.')
-    msg = client.messages.create(
-        model='claude-sonnet-4-6', max_tokens=max_tokens,
-        messages=[{'role': 'user', 'content': prompt}],
-    )
-    return msg.content[0].text.strip()
+def _call_gemini(prompt: str) -> str:
+    model = resources.get('gemini')
+    if model is None:
+        raise RuntimeError('GOOGLE_API_KEY is not set. Add it in the Render dashboard under Environment Variables.')
+    response = model.generate_content(prompt)
+    return response.text.strip()
 
 
 # ── Macro helpers ──────────────────────────────────────────────────────────
@@ -359,10 +358,10 @@ def _rank_with_claude(candidates, req):
         f'Reply ONLY with a JSON array of 5 objects with keys: '
         f'rank, name (verbatim), reason (1 sentence), match_pct (0-100).'
     )
-    text = _call_claude(prompt, max_tokens=1024)
+    text = _call_gemini(prompt)
     m = re.search(r'\[.*?\]', text, re.DOTALL)
     if not m:
-        raise ValueError('No JSON array in Claude response')
+        raise ValueError('No JSON array in AI response')
     ranked = json.loads(m.group())
     name_map = {c['food']['n']: c['food'] for c in candidates}
     result = []
@@ -390,10 +389,10 @@ def _lookup_nutrition(food_name: str) -> dict:
         '{"name":str,"unit":str,"serving_g":int,"protein_100":float,"carbs_100":float,"fat_100":float}\n'
         'Example: {"name":"Masala dosa","unit":"piece","serving_g":200,"protein_100":3.2,"carbs_100":28.5,"fat_100":5.1}'
     )
-    text = _call_claude(prompt, max_tokens=256)
+    text = _call_gemini(prompt)
     m = re.search(r'\{.*?\}', text, re.DOTALL)
     if not m:
-        raise ValueError(f'No JSON in Claude response: {text}')
+        raise ValueError(f'No JSON in AI response: {text}')
     d = json.loads(m.group())
     sg   = float(d['serving_g'])
     p100 = round(float(d['protein_100']), 1)
@@ -636,5 +635,5 @@ def lookup(req: LookupRequest):
         name=food['n'], unit=food['u'],
         protein_per_100=p100, carbs_per_100=c100, fat_per_100=f100, kcal_per_100=k100,
         protein_per_serving=food['up'], carbs_per_serving=food['uc'],
-        fat_per_serving=food['uf'], kcal_per_serving=food['uk'], source='claude',
+        fat_per_serving=food['uf'], kcal_per_serving=food['uk'], source='ai',
     )
