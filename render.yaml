@@ -6,7 +6,7 @@ services:
     rootDir: backend
     buildCommand: >
       pip install -r requirements.txt &&
-      python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+      HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: SECRET_KEY
@@ -16,6 +16,6 @@ services:
       - key: ANTHROPIC_API_KEY
         sync: false          # optional – enables AI ranking & food lookup
       - key: HF_HUB_OFFLINE
-        value: "1"
+        value: "0"
       - key: TRANSFORMERS_OFFLINE
-        value: "1"
+        value: "0"
