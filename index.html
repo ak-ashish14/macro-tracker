@@ -856,6 +856,9 @@ function onAuthSuccess(data) {
   if (!store.meals) store.meals = {};
   saveStore();
 
+  // Pull meals from server (overwrites localStorage meals with server truth)
+  syncMealsFromServer();
+
   document.getElementById('auth-overlay').style.display = 'none';
   document.getElementById('btn-profile').style.display  = '';
   var initials = (currentUser.name || currentUser.username).charAt(0).toUpperCase();
@@ -1053,6 +1056,7 @@ document.getElementById('btn-logout').onclick = function() {
           localStorage.setItem(USER_KEY, JSON.stringify(user));
           store.goals = user.goals;
           saveStore();
+          syncMealsFromServer();
           document.getElementById('auth-overlay').style.display = 'none';
           document.getElementById('btn-profile').style.display  = '';
           var initials = (user.name || user.username).charAt(0).toUpperCase();
@@ -1102,7 +1106,29 @@ fetch('foods.json')
 function loadStore() {
   try { return JSON.parse(localStorage.getItem(storeKeyForUser())) || {}; } catch(e) { return {}; }
 }
-function saveStore() { localStorage.setItem(storeKeyForUser(), JSON.stringify(store)); }
+function saveStore(changedDate) {
+  localStorage.setItem(storeKeyForUser(), JSON.stringify(store));
+  if (AUTH_TOKEN && changedDate) {
+    var entries = store.meals[changedDate] || [];
+    fetch(API_BASE + '/api/meals/' + changedDate, {
+      method: 'PUT', headers: authHeaders(),
+      body: JSON.stringify({ entries: entries })
+    }).catch(function() {});
+  }
+}
+
+function syncMealsFromServer(callback) {
+  if (!AUTH_TOKEN) { if (callback) callback(); return; }
+  fetch(API_BASE + '/api/meals', { headers: authHeaders() })
+    .then(function(r) { return r.json(); })
+    .then(function(serverMeals) {
+      store.meals = serverMeals;
+      localStorage.setItem(storeKeyForUser(), JSON.stringify(store));
+      render();
+      if (callback) callback();
+    })
+    .catch(function() { if (callback) callback(); });
+}
 
 var store = loadStore();
 if (!store.goals) store.goals = { protein: 150, carbs: 200, fat: 65 };
@@ -1237,7 +1263,7 @@ function esc(s) {
 function deleteMeal(i) {
   store.meals[currentDate].splice(i, 1);
   if (!store.meals[currentDate].length) delete store.meals[currentDate];
-  saveStore(); render();
+  saveStore(currentDate); render();
 }
 
 /* ── Food search ── */
@@ -1457,7 +1483,7 @@ document.getElementById('btn-save').onclick = function() {
     protein: parseFloat(p.toFixed(2)), carbs: parseFloat(c.toFixed(2)),
     fat: parseFloat(f.toFixed(2)), kcal: parseFloat(k.toFixed(1)), time: time
   });
-  saveStore();
+  saveStore(currentDate);
   closeModal('modal-meal');
   render();
 };
@@ -1870,7 +1896,7 @@ function renderDishes(dishes, ingredients) {
         fat:     parseFloat((s.fat||0).toFixed(2)),
         kcal:    parseFloat((s.kcal||0).toFixed(1)), time: time
       });
-      saveStore();
+      saveStore(currentDate);
       btn.textContent = '\u2713 Added';
       btn.style.background = 'rgba(74,222,128,.15)';
       btn.style.color = 'var(--green)';

@@ -82,6 +82,14 @@ def _init_db() -> None:
                     created_at    TIMESTAMPTZ  DEFAULT NOW()
                 )
             """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS meals (
+                    username VARCHAR(50) NOT NULL,
+                    date     DATE        NOT NULL,
+                    entries  JSONB       NOT NULL DEFAULT '[]',
+                    PRIMARY KEY (username, date)
+                )
+            """)
     conn.close()
     print("Database ready.")
 
@@ -543,6 +551,44 @@ def change_password(req: PasswordChange, user: dict = Depends(_get_user_from_tok
     finally:
         conn.close()
     return {'detail': 'Password updated'}
+
+
+# ── Meal Sync Routes ───────────────────────────────────────────────────────
+
+@app.get('/api/meals')
+def get_meals(user: dict = Depends(_get_user_from_token)):
+    conn = _db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute('SELECT date, entries FROM meals WHERE username = %s', (user['username'],))
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+    return {str(row['date']): row['entries'] for row in rows}
+
+
+class MealDayRequest(BaseModel):
+    entries: list
+
+
+@app.put('/api/meals/{date}')
+def put_meals(date: str, req: MealDayRequest, user: dict = Depends(_get_user_from_token)):
+    conn = _db()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                if req.entries:
+                    cur.execute("""
+                        INSERT INTO meals (username, date, entries)
+                        VALUES (%s, %s, %s)
+                        ON CONFLICT (username, date) DO UPDATE SET entries = EXCLUDED.entries
+                    """, (user['username'], date, json.dumps(req.entries)))
+                else:
+                    cur.execute('DELETE FROM meals WHERE username = %s AND date = %s',
+                                (user['username'], date))
+    finally:
+        conn.close()
+    return {'ok': True}
 
 
 # ── Food Routes ────────────────────────────────────────────────────────────
