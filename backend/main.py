@@ -809,6 +809,83 @@ def suggest(req: SuggestRequest):
     return SuggestResponse(dishes=dishes, candidates_found=len(candidates))
 
 
+# ── Exercise calorie estimation ────────────────────────────────────────────
+
+class ExerciseCaloriesRequest(BaseModel):
+    exercise_name: str
+    sets: list          # [{weight, reps}]
+    user_context: dict  # {goal, weight_kg}
+
+class ActivityCaloriesRequest(BaseModel):
+    activity: str
+    duration: int       # minutes
+    intensity: str      # light / moderate / intense
+
+@app.post('/api/exercise/calories')
+def estimate_exercise_calories(req: ExerciseCaloriesRequest, user: dict = Depends(_get_user_from_token)):
+    """Use Groq to estimate kcal burned from a resistance exercise."""
+    sets_desc = ', '.join(
+        f"Set {i+1}: {s.get('weight','?')}kg × {s.get('reps','?')} reps"
+        for i, s in enumerate(req.sets)
+        if s.get('weight') or s.get('reps')
+    )
+    if not sets_desc:
+        return {'calories_burned': 0}
+
+    goal = req.user_context.get('goal', 'MAINTENANCE')
+    weight_kg = req.user_context.get('weight_kg') or user.get('weight_kg') or 75
+
+    prompt = (
+        f"Estimate the net calories burned (above resting) for this resistance exercise session.\n"
+        f"Exercise: {req.exercise_name}\n"
+        f"Sets: {sets_desc}\n"
+        f"User body weight: {weight_kg} kg, fitness goal: {goal}\n"
+        f"Reply with ONLY a JSON object: {{\"calories_burned\": <integer>}}\n"
+        f"No explanation, no markdown, just the JSON."
+    )
+    try:
+        raw = _call_ai(prompt, max_tokens=64)
+        # Extract JSON from the response
+        import re as _re
+        match = _re.search(r'\{[^}]+\}', raw)
+        if not match:
+            raise ValueError('No JSON in response')
+        result = json.loads(match.group())
+        burned = max(0, int(result.get('calories_burned', 0)))
+        return {'calories_burned': burned}
+    except Exception:
+        # Rough fallback: ~5 kcal per rep × total volume
+        total_reps = sum(int(s.get('reps') or 0) for s in req.sets)
+        return {'calories_burned': max(0, total_reps * 5)}
+
+
+@app.post('/api/activity/calories')
+def estimate_activity_calories(req: ActivityCaloriesRequest, user: dict = Depends(_get_user_from_token)):
+    """Use Groq to estimate kcal burned from a free-form activity."""
+    weight_kg = user.get('weight_kg') or 75
+    prompt = (
+        f"Estimate the net calories burned (above resting) for this activity.\n"
+        f"Activity: {req.activity}\n"
+        f"Duration: {req.duration} minutes\n"
+        f"Intensity: {req.intensity}\n"
+        f"User body weight: {weight_kg} kg\n"
+        f"Reply with ONLY a JSON object: {{\"calories_burned\": <integer>}}\n"
+        f"No explanation, no markdown, just the JSON."
+    )
+    try:
+        raw = _call_ai(prompt, max_tokens=64)
+        import re as _re
+        match = _re.search(r'\{[^}]+\}', raw)
+        if not match:
+            raise ValueError('No JSON in response')
+        result = json.loads(match.group())
+        burned = max(0, int(result.get('calories_burned', 0)))
+        return {'calories_burned': burned}
+    except Exception:
+        # MET fallback: moderate running ~8 kcal/min
+        return {'calories_burned': max(0, req.duration * 6)}
+
+
 @app.post('/api/lookup', response_model=LookupResponse)
 def lookup(req: LookupRequest):
     if not req.food_name.strip():

@@ -29,7 +29,7 @@
       background: var(--bg);
       color: var(--text);
       min-height: 100vh;
-      padding-bottom: 90px;
+      padding-bottom: 150px;
     }
 
     header {
@@ -159,7 +159,7 @@
     .empty-state .em { font-size: 2.5rem; display: block; margin-bottom: 10px; }
 
     .fab {
-      position: fixed; bottom: 28px; right: 28px;
+      position: fixed; bottom: 78px; right: 20px;
       background: var(--accent); color: #fff; border: none; border-radius: 999px;
       padding: 14px 24px; font-size: 0.9rem; font-weight: 700;
       cursor: pointer; display: flex; align-items: center; gap: 8px;
@@ -497,6 +497,114 @@
     }
     .profile-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     .pw-note { font-size: 0.78rem; color: var(--text-dim); margin-bottom: 10px; }
+
+    /* ── Bottom navigation bar ─────────────────────────────────────────────── */
+    .bottom-nav {
+      position: fixed; bottom: 0; left: 0; right: 0; z-index: 50;
+      background: var(--surface); border-top: 1px solid var(--border);
+      display: none; /* shown only when logged in */
+      height: 64px;
+    }
+    .bottom-nav-inner { display: flex; height: 100%; }
+    .bnav-tab {
+      flex: 1; display: flex; flex-direction: column; align-items: center;
+      justify-content: center; gap: 3px;
+      background: none; border: none; cursor: pointer;
+      font-size: 0.58rem; font-weight: 600; color: var(--text-dim);
+      transition: color .18s; padding: 8px 4px; position: relative;
+    }
+    .bnav-tab .bnav-icon { font-size: 1.25rem; line-height: 1; }
+    .bnav-tab.active { color: var(--accent2); }
+    .bnav-tab.active::after {
+      content: ''; position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+      width: 32px; height: 3px; background: var(--accent2); border-radius: 0 0 3px 3px;
+    }
+
+    /* ── Exercise tab ──────────────────────────────────────────────────────── */
+    #section-exercise { padding: 0 0 150px; }
+
+    .ex-calories-banner {
+      margin: 16px 20px 0;
+      background: linear-gradient(135deg, #1e1b4b 0%, #2e1065 100%);
+      border: 1px solid #4c1d95; border-radius: var(--radius);
+      padding: 14px 18px;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .ex-calories-label { font-size: 0.72rem; font-weight: 600; color: #c4b5fd; }
+    .ex-calories-val { font-size: 1.4rem; font-weight: 800; color: #fff; }
+    .ex-calories-sub { font-size: 0.6rem; color: #a78bfa; margin-top: 2px; }
+
+    .ex-workout-select-wrap { padding: 14px 20px 0; }
+
+    /* Exercise cards */
+    .ex-card {
+      margin: 10px 20px 0;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); overflow: hidden;
+    }
+    .ex-card-header {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 13px 16px; cursor: pointer; user-select: none;
+      transition: background .15s;
+    }
+    .ex-card-header:hover { background: var(--surface2); }
+    .ex-card-name { font-size: 0.88rem; font-weight: 700; color: var(--text); }
+    .ex-card-meta { display: flex; align-items: center; gap: 10px; }
+    .ex-kcal-badge {
+      font-size: 0.65rem; font-weight: 700; color: #a78bfa;
+      background: rgba(167,139,250,.12); padding: 2px 8px; border-radius: 20px;
+    }
+    .ex-done-badge {
+      font-size: 0.65rem; font-weight: 700; color: #34d399;
+      background: rgba(52,211,153,.12); padding: 2px 8px; border-radius: 20px;
+    }
+    .ex-chevron { font-size: 0.85rem; color: var(--text-dim); transition: transform .2s; }
+    .ex-chevron.open { transform: rotate(180deg); }
+
+    .ex-card-body { padding: 0 16px 14px; border-top: 1px solid var(--border); }
+
+    /* Set table */
+    .ex-sets-header {
+      display: grid; grid-template-columns: 28px 56px 1fr 1fr 1fr;
+      gap: 6px; padding: 8px 0 4px;
+      font-size: 0.58rem; font-weight: 700; color: var(--text-dim);
+      text-transform: uppercase; letter-spacing: .06em;
+    }
+    .ex-set-row {
+      display: grid; grid-template-columns: 28px 56px 1fr 1fr 1fr;
+      gap: 6px; padding: 5px 0; align-items: center;
+      border-top: 1px solid rgba(46,49,80,.5);
+    }
+    .ex-set-num { font-size: 0.75rem; font-weight: 700; color: var(--text-dim); text-align: center; }
+    .ex-target-rep { font-size: 0.72rem; color: var(--text-dim); text-align: center; }
+    .ex-input {
+      background: var(--surface2); border: 1px solid var(--border); border-radius: 6px;
+      padding: 5px 7px; color: var(--text); font-size: 0.78rem; width: 100%;
+      text-align: center; outline: none; transition: border-color .15s;
+    }
+    .ex-input:focus { border-color: var(--accent2); }
+    .ex-input.notes { text-align: left; font-size: 0.72rem; }
+
+    .ex-save-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+    .ex-save-btn {
+      background: var(--accent); color: #fff; border: none; border-radius: 8px;
+      padding: 7px 16px; font-size: 0.78rem; font-weight: 700; cursor: pointer;
+      transition: opacity .15s;
+    }
+    .ex-save-btn:hover { opacity: .85; }
+    .ex-save-btn:disabled { opacity: .4; cursor: not-allowed; }
+    .ex-save-status { font-size: 0.72rem; color: var(--text-dim); }
+    .ex-save-status.ok { color: #34d399; }
+    .ex-save-status.err { color: var(--red); }
+
+    /* Activity modal */
+    .activity-option {
+      padding: 9px 14px; background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 8px; font-size: 0.82rem; cursor: pointer; margin-bottom: 6px;
+      transition: border-color .15s, background .15s;
+    }
+    .activity-option:hover { border-color: var(--accent2); background: rgba(108,99,255,.08); }
+    .activity-option.selected { border-color: var(--accent2); background: rgba(108,99,255,.12); color: var(--accent2); font-weight: 600; }
   </style>
 </head>
 <body>
@@ -648,7 +756,7 @@
   <button id="next-day">&#8250;</button>
 </div>
 
-<main>
+<main id="section-nutrition">
   <div class="calorie-strip" style="margin-top:20px">
     <div class="gauge-wrap">
       <svg viewBox="0 0 200 160" id="gauge-svg" preserveAspectRatio="xMidYMid meet"></svg>
@@ -734,9 +842,120 @@
   <div class="meal-list" id="meal-list"></div>
 </main>
 
-<button class="fab" id="btn-add">
-  <span>+</span> Log Meal
+<!-- ═══ Exercise Tab ═══════════════════════════════════════════════════════ -->
+<section id="section-exercise" style="display:none">
+
+  <!-- Calories Burned Banner -->
+  <div class="ex-calories-banner">
+    <div>
+      <div class="ex-calories-label">&#x1F525; CALORIES BURNED TODAY</div>
+      <div class="ex-calories-val" id="ex-total-kcal">0 <span style="font-size:0.9rem;font-weight:600">kcal</span></div>
+      <div class="ex-calories-sub" id="ex-calories-sub">Log exercises below to track burn</div>
+    </div>
+    <div style="font-size:2rem">&#x1F3CB;&#xFE0F;</div>
+  </div>
+
+  <!-- Workout Selector -->
+  <div class="ex-workout-select-wrap">
+    <div style="font-size:0.7rem;font-weight:700;color:var(--text-dim);letter-spacing:.06em;margin-bottom:8px">SELECT WORKOUT</div>
+    <select class="auth-input" id="ex-workout-select" style="margin:0">
+      <option value="">Choose a workout to begin…</option>
+      <option value="0">Workout 1 &#x2013; Push</option>
+      <option value="1">Workout 2 &#x2013; Pull</option>
+      <option value="2">Workout 3 &#x2013; Upper Body A</option>
+      <option value="3">Workout 4 &#x2013; Legs</option>
+      <option value="4">Workout 5 &#x2013; Upper Body B</option>
+    </select>
+  </div>
+
+  <!-- Empty state -->
+  <div id="ex-empty-state" class="empty-state" style="margin:32px 20px">
+    <span class="em">&#x1F3CB;&#xFE0F;</span>
+    Select a workout above to get started
+  </div>
+
+  <!-- Today's Workout exercises (rendered by JS) -->
+  <div id="ex-workout-section" style="display:none">
+    <div style="padding:18px 20px 4px;display:flex;justify-content:space-between;align-items:center">
+      <div class="section-title" style="margin:0" id="ex-workout-title">Today&#x2019;s Workout</div>
+      <div style="font-size:0.7rem;color:var(--text-dim)" id="ex-exercise-count"></div>
+    </div>
+    <div id="ex-exercise-list"></div>
+  </div>
+
+</section>
+
+<!-- ═══ FAB (context-aware) ═══════════════════════════════════════════════ -->
+<button class="fab" id="btn-fab">
+  <span id="btn-fab-icon">+</span> <span id="btn-fab-label">Log Meal</span>
 </button>
+
+<!-- ═══ Bottom Navigation ══════════════════════════════════════════════════ -->
+<nav class="bottom-nav" id="bottom-nav">
+  <div class="bottom-nav-inner">
+    <button class="bnav-tab active" id="bnav-nutrition" onclick="switchTab('nutrition')">
+      <span class="bnav-icon">&#x1F957;</span>
+      Nutrition
+    </button>
+    <button class="bnav-tab" id="bnav-exercise" onclick="switchTab('exercise')">
+      <span class="bnav-icon">&#x1F3CB;&#xFE0F;</span>
+      Exercise
+    </button>
+    <button class="bnav-tab" id="bnav-progress" onclick="switchTab('progress')">
+      <span class="bnav-icon">&#x1F4C8;</span>
+      Progress
+    </button>
+  </div>
+</nav>
+
+<!-- ═══ Activity Log Modal ════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="modal-activity">
+  <div class="modal">
+    <div class="modal-title">&#x26A1; Log an Activity</div>
+    <p style="font-size:0.82rem;color:var(--text-dim);margin-bottom:16px">Not a structured workout? Log any activity and we&#x2019;ll estimate the calories burned.</p>
+
+    <div class="form-group">
+      <label>Activity Type</label>
+      <div id="activity-presets" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">
+        <div class="activity-option" onclick="selectActivity(this,'Running')">&#x1F3C3; Running</div>
+        <div class="activity-option" onclick="selectActivity(this,'Cycling')">&#x1F6B4; Cycling</div>
+        <div class="activity-option" onclick="selectActivity(this,'Swimming')">&#x1F3CA; Swimming</div>
+        <div class="activity-option" onclick="selectActivity(this,'Cricket')">&#x1F3CF; Cricket</div>
+        <div class="activity-option" onclick="selectActivity(this,'Football')">&#x26BD; Football</div>
+        <div class="activity-option" onclick="selectActivity(this,'Yoga')">&#x1F9D8; Yoga</div>
+        <div class="activity-option" onclick="selectActivity(this,'Walking')">&#x1F6B6; Walking</div>
+        <div class="activity-option" onclick="selectActivity(this,'HIIT')">&#x1F525; HIIT</div>
+      </div>
+      <input class="auth-input" type="text" id="activity-custom" placeholder="Or type a custom activity…" style="margin:0" oninput="clearActivityPresets()" />
+    </div>
+
+    <div class="auth-row" style="margin-top:12px">
+      <div class="form-group" style="flex:1;margin:0">
+        <label>Duration (min)</label>
+        <input class="auth-input" type="number" id="activity-duration" placeholder="30" min="1" max="300" style="margin:0" />
+      </div>
+      <div class="form-group" style="flex:1;margin:0">
+        <label>Intensity</label>
+        <select class="auth-input" id="activity-intensity" style="margin:0">
+          <option value="light">&#x1F6B6; Light</option>
+          <option value="moderate" selected>&#x1F3C3; Moderate</option>
+          <option value="intense">&#x26A1; Intense</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="auth-error" id="activity-error"></div>
+    <div id="activity-result" style="display:none;margin-top:12px;padding:12px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px">
+      <div style="font-size:0.68rem;font-weight:700;color:var(--accent2);margin-bottom:4px">&#x1F525; ESTIMATED CALORIES BURNED</div>
+      <div style="font-size:1.4rem;font-weight:800" id="activity-result-kcal">0 kcal</div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-activity')">Cancel</button>
+      <button class="btn" style="background:var(--accent);color:#fff" id="btn-activity-submit" onclick="submitActivity()">Estimate &amp; Log</button>
+    </div>
+  </div>
+</div>
 
 <!-- Add Meal Modal -->
 <div class="modal-overlay" id="modal-meal">
@@ -1025,6 +1244,7 @@ function onAuthSuccess(data) {
 function _showMainApp() {
   syncMealsFromServer();
   document.getElementById('btn-profile').style.display = '';
+  document.getElementById('bottom-nav').style.display = 'flex';
   var label = currentUser.name || currentUser.email || currentUser.username || '?';
   document.getElementById('user-avatar').textContent = label.charAt(0).toUpperCase();
   document.getElementById('user-label').textContent  = label;
@@ -2467,7 +2687,11 @@ function highlightIngredients(name, ingredients) {
 }
 
 /* ── Modal helpers ── */
-document.getElementById('btn-add').onclick = function() { clearFood(); openModal('modal-meal'); };
+// FAB click is context-aware — handled by switchTab / initFab
+document.getElementById('btn-fab').onclick = function() {
+  if (_activeTab === 'nutrition') { clearFood(); openModal('modal-meal'); }
+  else if (_activeTab === 'exercise') { openActivityModal(); }
+};
 document.getElementById('btn-cancel-meal').onclick = function() { closeModal('modal-meal'); };
 document.getElementById('btn-cancel-goals').onclick = function() { closeModal('modal-goals'); };
 
@@ -2493,6 +2717,425 @@ function closeModal(id) {
 document.addEventListener('keydown', function(e) {
   if (e.key === 'Escape') { closeModal('modal-meal'); closeModal('modal-goals'); }
 });
+
+render();
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ── TAB NAVIGATION ─────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+
+var _activeTab = 'nutrition';
+
+function switchTab(tab) {
+  _activeTab = tab;
+
+  // Show/hide main sections
+  document.getElementById('section-nutrition').style.display = tab === 'nutrition' ? '' : 'none';
+  document.getElementById('section-exercise').style.display  = tab === 'exercise'  ? '' : 'none';
+
+  // Date nav only needed for nutrition
+  var dateNav = document.querySelector('.date-nav');
+  if (dateNav) dateNav.style.display = tab === 'nutrition' ? '' : 'none';
+
+  // Tab bar highlight
+  ['nutrition', 'exercise', 'progress'].forEach(function(t) {
+    var el = document.getElementById('bnav-' + t);
+    if (el) el.classList.toggle('active', t === tab);
+  });
+
+  // FAB label & visibility
+  var fabLabel = document.getElementById('btn-fab-label');
+  var fabIcon  = document.getElementById('btn-fab-icon');
+  var fab      = document.getElementById('btn-fab');
+  if (tab === 'nutrition') {
+    fab.style.display = '';
+    fab.style.background = 'var(--accent)';
+    fabIcon.textContent = '+';
+    fabLabel.textContent = 'Log Meal';
+  } else if (tab === 'exercise') {
+    fab.style.display = '';
+    fab.style.background = '#059669';
+    fabIcon.textContent = '⚡';
+    fabLabel.textContent = 'Log Activity';
+  } else {
+    fab.style.display = 'none';
+  }
+
+  // Render the active tab
+  if (tab === 'exercise') renderExerciseTab();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ── EXERCISE TAB ───────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+
+var WORKOUTS_DATA = [
+  {
+    name: 'Workout 1 - Push',
+    exercises: [
+      { name: 'Dumbbell Bench Press',         sets: [{set:1,target_rep:'8-12'},{set:2,target_rep:'8-12'},{set:3,target_rep:'8-12'}] },
+      { name: 'Incline Dumbbell Bench Press',  sets: [{set:1,target_rep:'8-12'},{set:2,target_rep:'8-12'},{set:3,target_rep:'8-12'}] },
+      { name: 'Dip',                           sets: [{set:1,target_rep:'8-12'},{set:2,target_rep:'8-12'},{set:3,target_rep:'8-12'}] },
+      { name: 'Seated Triceps Press',          sets: [{set:1,target_rep:'8-12'},{set:2,target_rep:'8-12'},{set:3,target_rep:'8-12'}] }
+    ]
+  },
+  {
+    name: 'Workout 2 - Pull',
+    exercises: [
+      { name: 'Dumbbell Deadlift',             sets: [{set:1,target_rep:'8-12'},{set:2,target_rep:'8-12'},{set:3,target_rep:'8-12'}] },
+      { name: 'One-Arm Dumbbell Row',          sets: [{set:1,target_rep:'8-12'},{set:2,target_rep:'8-12'},{set:3,target_rep:'8-12'}] },
+      { name: 'Chin-up',                       sets: [{set:1,target_rep:'8-12'},{set:2,target_rep:'8-12'},{set:3,target_rep:'8-12'}] },
+      { name: 'Alternating Dumbbell Curl',     sets: [{set:1,target_rep:'8-12'},{set:2,target_rep:'8-12'},{set:3,target_rep:'8-12'}] }
+    ]
+  },
+  {
+    name: 'Workout 3 - Upper Body A',
+    exercises: [
+      { name: 'Seated Dumbbell Press',                    sets: [{set:1,target_rep:'8-12'},{set:2,target_rep:'8-12'},{set:3,target_rep:'8-12'}] },
+      { name: 'Dumbbell Side Lateral Raise',              sets: [{set:1,target_rep:'8-12'},{set:2,target_rep:'8-12'},{set:3,target_rep:'8-12'}] },
+      { name: 'Dumbbell Rear Lateral Raise (Seated)',     sets: [{set:1,target_rep:'8-12'},{set:2,target_rep:'8-12'},{set:3,target_rep:'8-12'}] },
+      { name: 'Seated Triceps Press',                     sets: [{set:1,target_rep:'8-12'},{set:2,target_rep:'8-12'},{set:3,target_rep:'8-12'}] }
+    ]
+  },
+  {
+    name: 'Workout 4 - Legs',
+    exercises: [
+      { name: 'Dumbbell Goblet Squat',                    sets: [{set:1,target_rep:'8-12'},{set:2,target_rep:'8-12'},{set:3,target_rep:'8-12'}] },
+      { name: 'Single Leg Split Squat (Dumbbell)',        sets: [{set:1,target_rep:'8-12'},{set:2,target_rep:'8-12'},{set:3,target_rep:'8-12'}] },
+      { name: 'Dumbbell Romanian Deadlift',               sets: [{set:1,target_rep:'8-12'},{set:2,target_rep:'8-12'},{set:3,target_rep:'8-12'}] },
+      { name: 'Dumbbell Lunge (In-Place)',                sets: [{set:1,target_rep:'8-12'},{set:2,target_rep:'8-12'},{set:3,target_rep:'8-12'}] }
+    ]
+  },
+  {
+    name: 'Workout 5 - Upper Body B',
+    exercises: [
+      { name: 'Close-Grip Dumbbell Bench Press',          sets: [{set:1,target_rep:'8-12'},{set:2,target_rep:'8-12'},{set:3,target_rep:'8-12'}] },
+      { name: 'Chin-up',                                  sets: [{set:1,target_rep:'8-12'},{set:2,target_rep:'8-12'},{set:3,target_rep:'8-12'}] },
+      { name: 'Two-Arm Dumbbell Row',                     sets: [{set:1,target_rep:'8-12'},{set:2,target_rep:'8-12'},{set:3,target_rep:'8-12'}] },
+      { name: 'Alternating Dumbbell Curl',                sets: [{set:1,target_rep:'8-12'},{set:2,target_rep:'8-12'},{set:3,target_rep:'8-12'}] }
+    ]
+  }
+];
+
+// ── Exercise store helpers ──────────────────────────────────────────────────
+
+function _exKey() { return 'mt_ex_' + currentDate; }
+
+function _getExStore() {
+  var raw = localStorage.getItem(_exKey());
+  if (raw) { try { return JSON.parse(raw); } catch(e) {} }
+  return { workoutIndex: null, setData: {}, exerciseCalories: {}, activityLogs: [], totalCalories: 0 };
+}
+
+function _saveExStore(data) {
+  localStorage.setItem(_exKey(), JSON.stringify(data));
+}
+
+// ── Render exercise tab ─────────────────────────────────────────────────────
+
+function renderExerciseTab() {
+  var data   = _getExStore();
+  var select = document.getElementById('ex-workout-select');
+
+  // Restore selected workout
+  if (data.workoutIndex !== null && data.workoutIndex !== undefined) {
+    select.value = String(data.workoutIndex);
+    _renderWorkout(data.workoutIndex, data);
+  } else {
+    select.value = '';
+    document.getElementById('ex-empty-state').style.display  = '';
+    document.getElementById('ex-workout-section').style.display = 'none';
+  }
+  _updateCaloriesBanner(data);
+}
+
+document.getElementById('ex-workout-select').addEventListener('change', function() {
+  if (this.value === '') {
+    document.getElementById('ex-empty-state').style.display     = '';
+    document.getElementById('ex-workout-section').style.display = 'none';
+    return;
+  }
+  var idx  = parseInt(this.value);
+  var data = _getExStore();
+  data.workoutIndex = idx;
+  _saveExStore(data);
+  _renderWorkout(idx, data);
+});
+
+function _renderWorkout(idx, data) {
+  var workout  = WORKOUTS_DATA[idx];
+  document.getElementById('ex-empty-state').style.display     = 'none';
+  document.getElementById('ex-workout-section').style.display = '';
+  document.getElementById('ex-workout-title').textContent     = workout.name;
+  document.getElementById('ex-exercise-count').textContent    = workout.exercises.length + ' exercises';
+
+  var list = document.getElementById('ex-exercise-list');
+  list.innerHTML = '';
+  workout.exercises.forEach(function(ex, i) {
+    list.appendChild(_buildExerciseCard(ex, i, data));
+  });
+}
+
+function _buildExerciseCard(ex, idx, data) {
+  var saved   = (data.setData || {})[ex.name] || [];
+  var kcal    = (data.exerciseCalories || {})[ex.name] || null;
+  var isDone  = saved.length > 0 && saved.some(function(s) { return s.weight || s.reps; });
+
+  var card = document.createElement('div');
+  card.className = 'ex-card';
+  card.id = 'ex-card-' + idx;
+
+  // Badge HTML
+  var badgeHtml = '';
+  if (kcal !== null) {
+    badgeHtml += '<span class="ex-kcal-badge">&#x1F525; ' + kcal + ' kcal</span>';
+  }
+  if (isDone) {
+    badgeHtml += '<span class="ex-done-badge">&#x2705; Logged</span>';
+  }
+
+  // Set rows
+  var setRowsHtml = ex.sets.map(function(s, si) {
+    var sv = saved[si] || {};
+    return '<div class="ex-set-row">'
+      + '<span class="ex-set-num">' + s.set + '</span>'
+      + '<span class="ex-target-rep">' + s.target_rep + '</span>'
+      + '<input class="ex-input" type="number" placeholder="kg" min="0" step="0.5"'
+      +   ' id="ex-w-' + idx + '-' + si + '" value="' + (sv.weight || '') + '"'
+      +   ' oninput="_autoSaveSet(' + idx + ',' + si + ')">'
+      + '<input class="ex-input" type="number" placeholder="reps" min="0"'
+      +   ' id="ex-r-' + idx + '-' + si + '" value="' + (sv.reps || '') + '"'
+      +   ' oninput="_autoSaveSet(' + idx + ',' + si + ')">'
+      + '<input class="ex-input notes" type="text" placeholder="note…"'
+      +   ' id="ex-n-' + idx + '-' + si + '" value="' + (sv.notes || '') + '"'
+      +   ' oninput="_autoSaveSet(' + idx + ',' + si + ')">'
+      + '</div>';
+  }).join('');
+
+  card.innerHTML =
+    '<div class="ex-card-header" onclick="_toggleExCard(' + idx + ')">'
+    +   '<div class="ex-card-name">' + ex.name + '</div>'
+    +   '<div class="ex-card-meta">'
+    +     badgeHtml
+    +     '<span class="ex-chevron" id="ex-chev-' + idx + '">&#x25BE;</span>'
+    +   '</div>'
+    + '</div>'
+    + '<div class="ex-card-body" id="ex-body-' + idx + '" style="display:none">'
+    +   '<div class="ex-sets-header"><span>Set</span><span>Target</span><span>Weight</span><span>Reps</span><span>Notes</span></div>'
+    +   setRowsHtml
+    +   '<div class="ex-save-row">'
+    +     '<button class="ex-save-btn" id="ex-save-btn-' + idx + '" onclick="_saveExercise(' + idx + ')">Save Exercise</button>'
+    +     '<span class="ex-save-status" id="ex-save-status-' + idx + '">'
+    +       (kcal !== null ? '&#x1F525; ' + kcal + ' kcal burned' : '') + '</span>'
+    +   '</div>'
+    + '</div>';
+
+  return card;
+}
+
+function _toggleExCard(idx) {
+  var body  = document.getElementById('ex-body-' + idx);
+  var chev  = document.getElementById('ex-chev-' + idx);
+  var open  = body.style.display !== 'none';
+  body.style.display = open ? 'none' : '';
+  if (chev) chev.classList.toggle('open', !open);
+}
+
+function _autoSaveSet(exIdx, setIdx) {
+  var workoutIdx = parseInt(document.getElementById('ex-workout-select').value);
+  if (isNaN(workoutIdx)) return;
+  var ex   = WORKOUTS_DATA[workoutIdx].exercises[exIdx];
+  var data = _getExStore();
+  if (!data.setData) data.setData = {};
+  if (!data.setData[ex.name]) data.setData[ex.name] = [];
+  data.setData[ex.name][setIdx] = {
+    weight: document.getElementById('ex-w-' + exIdx + '-' + setIdx).value,
+    reps:   document.getElementById('ex-r-' + exIdx + '-' + setIdx).value,
+    notes:  document.getElementById('ex-n-' + exIdx + '-' + setIdx).value,
+  };
+  _saveExStore(data);
+}
+
+function _saveExercise(exIdx) {
+  var workoutIdx = parseInt(document.getElementById('ex-workout-select').value);
+  if (isNaN(workoutIdx)) return;
+  var ex     = WORKOUTS_DATA[workoutIdx].exercises[exIdx];
+  var data   = _getExStore();
+  var saved  = (data.setData || {})[ex.name] || [];
+  var btn    = document.getElementById('ex-save-btn-' + exIdx);
+  var status = document.getElementById('ex-save-status-' + exIdx);
+
+  // Build sets payload (only sets with at least weight or reps)
+  var sets = ex.sets.map(function(s, si) {
+    var sv = saved[si] || {};
+    return { weight: parseFloat(sv.weight) || 0, reps: parseInt(sv.reps) || 0 };
+  }).filter(function(s) { return s.weight > 0 || s.reps > 0; });
+
+  if (sets.length === 0) {
+    status.textContent = 'Enter at least one set to save.';
+    status.className = 'ex-save-status err';
+    return;
+  }
+
+  btn.disabled = true;
+  status.textContent = 'Estimating calories…';
+  status.className   = 'ex-save-status';
+
+  fetch(API_BASE + '/api/exercise/calories', {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({
+      exercise_name: ex.name,
+      sets: sets,
+      user_context: {
+        goal:      (currentUser && currentUser.fitness_goal) || 'MAINTENANCE',
+        weight_kg: (currentUser && currentUser.weight_kg)    || 75
+      }
+    })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(res) {
+    var burned = res.calories_burned || 0;
+
+    // Save to store
+    data = _getExStore();
+    if (!data.exerciseCalories) data.exerciseCalories = {};
+    data.exerciseCalories[ex.name] = burned;
+    data.totalCalories = _sumCalories(data);
+    _saveExStore(data);
+
+    // Update UI
+    status.textContent = '✅ Exercise Logged — 🔥 ' + burned + ' kcal burned';
+    status.className   = 'ex-save-status ok';
+    btn.disabled = false;
+
+    // Refresh badge on card header
+    var badge = document.querySelector('#ex-card-' + exIdx + ' .ex-kcal-badge');
+    if (badge) { badge.textContent = '🔥 ' + burned + ' kcal'; }
+    else {
+      var meta = document.querySelector('#ex-card-' + exIdx + ' .ex-card-meta');
+      if (meta) {
+        var b = document.createElement('span');
+        b.className = 'ex-kcal-badge';
+        b.textContent = '🔥 ' + burned + ' kcal';
+        meta.insertBefore(b, meta.firstChild);
+      }
+    }
+    var doneBadge = document.querySelector('#ex-card-' + exIdx + ' .ex-done-badge');
+    if (!doneBadge) {
+      var meta2 = document.querySelector('#ex-card-' + exIdx + ' .ex-card-meta');
+      if (meta2) {
+        var b2 = document.createElement('span');
+        b2.className = 'ex-done-badge';
+        b2.textContent = '✅ Logged';
+        meta2.insertBefore(b2, meta2.children[1] || null);
+      }
+    }
+
+    _updateCaloriesBanner(data);
+  })
+  .catch(function() {
+    btn.disabled = false;
+    status.textContent = 'Calories will be updated shortly — saved locally.';
+    status.className   = 'ex-save-status err';
+    // Save without calories
+    data = _getExStore();
+    _saveExStore(data);
+  });
+}
+
+function _sumCalories(data) {
+  var total = 0;
+  var ec = data.exerciseCalories || {};
+  Object.keys(ec).forEach(function(k) { total += (ec[k] || 0); });
+  var al = data.activityLogs || [];
+  al.forEach(function(a) { total += (a.calories || 0); });
+  return total;
+}
+
+function _updateCaloriesBanner(data) {
+  var total = data.totalCalories || 0;
+  document.getElementById('ex-total-kcal').innerHTML = total + ' <span style="font-size:0.9rem;font-weight:600">kcal</span>';
+  var al = (data.activityLogs || []);
+  var exCount = Object.keys(data.exerciseCalories || {}).filter(function(k){ return data.exerciseCalories[k] > 0; }).length;
+  var parts = [];
+  if (exCount > 0) parts.push(exCount + ' exercise' + (exCount > 1 ? 's' : '') + ' logged');
+  if (al.length > 0) parts.push(al.length + ' activit' + (al.length > 1 ? 'ies' : 'y') + ' logged');
+  document.getElementById('ex-calories-sub').textContent = parts.length ? parts.join(' · ') : 'Log exercises below to track burn';
+}
+
+// ── Activity Modal ─────────────────────────────────────────────────────────
+
+var _selectedActivity = '';
+
+function openActivityModal() {
+  _selectedActivity = '';
+  document.getElementById('activity-custom').value    = '';
+  document.getElementById('activity-duration').value  = '';
+  document.getElementById('activity-intensity').value = 'moderate';
+  document.getElementById('activity-error').textContent = '';
+  document.getElementById('activity-result').style.display = 'none';
+  document.querySelectorAll('.activity-option').forEach(function(el) { el.classList.remove('selected'); });
+  openModal('modal-activity');
+}
+
+function selectActivity(el, name) {
+  _selectedActivity = name;
+  document.getElementById('activity-custom').value = '';
+  document.querySelectorAll('.activity-option').forEach(function(o) { o.classList.remove('selected'); });
+  el.classList.add('selected');
+}
+
+function clearActivityPresets() {
+  _selectedActivity = '';
+  document.querySelectorAll('.activity-option').forEach(function(o) { o.classList.remove('selected'); });
+}
+
+function submitActivity() {
+  var activity  = _selectedActivity || document.getElementById('activity-custom').value.trim();
+  var duration  = parseInt(document.getElementById('activity-duration').value);
+  var intensity = document.getElementById('activity-intensity').value;
+  var errEl     = document.getElementById('activity-error');
+
+  if (!activity) { errEl.textContent = 'Please select or enter an activity.'; return; }
+  if (!duration || duration < 1) { errEl.textContent = 'Please enter a valid duration.'; return; }
+  errEl.textContent = '';
+
+  var btn = document.getElementById('btn-activity-submit');
+  btn.disabled = true;
+  btn.textContent = 'Estimating…';
+
+  fetch(API_BASE + '/api/activity/calories', {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ activity: activity, duration: duration, intensity: intensity })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(res) {
+    var burned = res.calories_burned || 0;
+
+    // Show result in modal
+    document.getElementById('activity-result').style.display = '';
+    document.getElementById('activity-result-kcal').textContent = burned + ' kcal';
+
+    // Save to store
+    var data = _getExStore();
+    if (!data.activityLogs) data.activityLogs = [];
+    data.activityLogs.push({ activity: activity, duration: duration, intensity: intensity, calories: burned });
+    data.totalCalories = _sumCalories(data);
+    _saveExStore(data);
+    _updateCaloriesBanner(data);
+
+    btn.disabled = false;
+    btn.textContent = 'Log Another';
+    btn.onclick = function() { closeModal('modal-activity'); openActivityModal(); };
+  })
+  .catch(function() {
+    errEl.textContent = 'Could not estimate calories. Please try again.';
+    btn.disabled = false;
+    btn.textContent = 'Estimate & Log';
+  });
+}
 
 render();
 </script>
