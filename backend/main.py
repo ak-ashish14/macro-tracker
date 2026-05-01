@@ -631,6 +631,11 @@ def _suggest_with_ai_new(req: SuggestRequest) -> list[dict]:
         )
 
     parts.append(
+        "\nRules for your suggestions:"
+        "\n- Each dish must be a COMPLETE meal or snack (not a condiment, pickle, sauce, chutney, or side)"
+        "\n- Each dish must be 500 kcal or less per serving"
+        "\n- Prioritise healthy, balanced, and genuinely tasty options — think dal, sabzi, grilled protein, rice bowls, wraps, salads, etc."
+        "\n- Avoid deep-fried heavy items; prefer grilled, baked, steamed, or lightly sautéed"
         "\nSuggest the TOP 5 dishes that best fit within this nutrition budget."
         "\nEstimate realistic macronutrients for a typical single serving."
         "\nReply ONLY with a valid JSON array of exactly 5 objects — no markdown, no extra text:"
