@@ -460,6 +460,25 @@
       margin-bottom: 14px;
     }
     .auth-divider { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
+    /* Onboarding option cards */
+    .ob-card {
+      flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 6px; padding: 14px 6px; border-radius: 12px; border: 2px solid var(--border);
+      background: var(--surface2); color: var(--text); font-size: 1.6rem; cursor: pointer;
+      transition: border-color .15s, background .15s, transform .1s;
+    }
+    .ob-card:hover { border-color: var(--accent); background: var(--surface); }
+    .ob-card.selected {
+      border-color: var(--accent); background: rgba(108,99,255,.15);
+      transform: translateY(-2px);
+    }
+    .ob-card-label { font-size: 0.72rem; font-weight: 700; color: var(--text); white-space: nowrap; }
+    /* Read-only badge in profile */
+    .locked-badge {
+      display: inline-flex; align-items: center; gap: 4px; font-size: 0.68rem;
+      background: rgba(108,99,255,.12); border: 1px solid rgba(108,99,255,.25);
+      border-radius: 999px; padding: 2px 8px; color: var(--accent2); font-weight: 600;
+    }
 
     /* ── Profile modal ────────────────────────────────────────────────── */
     .user-btn {
@@ -494,40 +513,61 @@
 
     <!-- Login -->
     <div id="auth-login">
-      <input class="auth-input" type="text" id="login-username" placeholder="Username" autocomplete="username" />
+      <input class="auth-input" type="email" id="login-email" placeholder="Email address" autocomplete="email" />
       <input class="auth-input" type="password" id="login-password" placeholder="Password" autocomplete="current-password" />
       <button class="auth-btn" id="btn-login">Sign In</button>
       <div class="auth-error" id="login-error"></div>
     </div>
 
-    <!-- Register step 1: credentials -->
+    <!-- Register: email + password only -->
     <div id="auth-register" style="display:none">
-      <div class="auth-step-label" id="reg-step-label">Step 1 of 2 &mdash; Create your account</div>
-      <div id="reg-step1">
-        <input class="auth-input" type="text" id="reg-username" placeholder="Username (min 3 chars)" autocomplete="username" />
-        <input class="auth-input" type="password" id="reg-password" placeholder="Password (min 6 chars)" autocomplete="new-password" />
-        <button class="auth-btn" id="btn-reg-next">Continue &rarr;</button>
+      <div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:14px;line-height:1.5">
+        Create your account in seconds. You'll personalise your goals right after.
       </div>
-      <!-- Register step 2: profile -->
-      <div id="reg-step2" style="display:none">
-        <input class="auth-input" type="text" id="reg-name" placeholder="Full name" />
-        <div class="auth-row">
-          <input class="auth-input" type="number" id="reg-age" placeholder="Age" min="1" max="120" />
-          <select class="auth-input" id="reg-gender">
-            <option value="">Gender</option>
-            <option value="male">Male</option>
-            <option value="female">Female</option>
-            <option value="other">Other</option>
-          </select>
-        </div>
-        <div class="auth-row">
-          <input class="auth-input" type="number" id="reg-weight" placeholder="Weight (kg)" step="0.1" />
-          <input class="auth-input" type="number" id="reg-height" placeholder="Height (cm)" step="0.1" />
-        </div>
-        <button class="auth-btn" id="btn-reg-submit">Create Account</button>
-        <button class="auth-btn" id="btn-reg-back" style="background:var(--surface2);color:var(--text);margin-top:6px">&larr; Back</button>
-      </div>
+      <input class="auth-input" type="email" id="reg-email" placeholder="Email address" autocomplete="email" />
+      <input class="auth-input" type="password" id="reg-password" placeholder="Password (min 6 chars)" autocomplete="new-password" />
+      <button class="auth-btn" id="btn-reg-submit">Create Account &rarr;</button>
       <div class="auth-error" id="reg-error"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Onboarding overlay (blocking, shown after first login) -->
+<div id="onboarding-overlay" style="display:none;position:fixed;inset:0;background:rgba(10,10,20,.92);z-index:2000;display:none;align-items:center;justify-content:center;padding:16px">
+  <div class="auth-card" style="max-width:420px;width:100%">
+    <div class="auth-logo" style="margin-bottom:4px">Macro<span>Track</span></div>
+    <div style="font-size:1rem;font-weight:700;margin-bottom:6px;text-align:center">Personalise Your Experience</div>
+    <div style="display:flex;align-items:center;gap:8px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:8px;padding:9px 12px;margin-bottom:18px;font-size:0.75rem;color:#fca5a5;line-height:1.4">
+      <span style="font-size:1rem">&#x26A0;&#xFE0F;</span>
+      <span>These preferences <strong>cannot be changed</strong> after submission. Choose carefully.</span>
+    </div>
+
+    <!-- Dietary preference -->
+    <div style="margin-bottom:18px">
+      <div style="font-size:0.8rem;font-weight:700;color:var(--text-dim);letter-spacing:.05em;margin-bottom:10px">DIETARY PREFERENCE</div>
+      <div style="display:flex;gap:8px" id="diet-options">
+        <button class="ob-card" data-group="diet" data-val="VEG">&#x1F96C;<div class="ob-card-label">Veg</div></button>
+        <button class="ob-card" data-group="diet" data-val="NON_VEG">&#x1F357;<div class="ob-card-label">Non-Veg</div></button>
+        <button class="ob-card" data-group="diet" data-val="EGGETARIAN">&#x1F95A;<div class="ob-card-label">Eggetarian</div></button>
+      </div>
+    </div>
+
+    <!-- Fitness goal -->
+    <div style="margin-bottom:20px">
+      <div style="font-size:0.8rem;font-weight:700;color:var(--text-dim);letter-spacing:.05em;margin-bottom:10px">FITNESS GOAL</div>
+      <div style="display:flex;gap:8px" id="goal-options">
+        <button class="ob-card" data-group="goal" data-val="LEAN_GAIN">&#x1F4AA;<div class="ob-card-label">Lean Muscle</div></button>
+        <button class="ob-card" data-group="goal" data-val="FAT_LOSS">&#x1F525;<div class="ob-card-label">Cutting Fat</div></button>
+        <button class="ob-card" data-group="goal" data-val="MAINTENANCE">&#x2696;&#xFE0F;<div class="ob-card-label">Maintenance</div></button>
+      </div>
+    </div>
+
+    <div class="auth-error" id="onboarding-error"></div>
+    <button class="auth-btn" id="btn-onboarding-submit" disabled style="opacity:.5;cursor:not-allowed">
+      Select both options to continue
+    </button>
+    <div style="font-size:0.7rem;color:var(--text-dim);text-align:center;margin-top:10px">
+      Step 2 of 2 &mdash; Onboarding
     </div>
   </div>
 </div>
@@ -780,6 +820,22 @@
   <div class="modal" style="max-height:90vh;overflow-y:auto">
     <div class="modal-title">My Profile</div>
 
+    <!-- Locked preferences (read-only) -->
+    <div id="prof-locked-section" style="margin-bottom:16px;display:none">
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <div style="flex:1;min-width:120px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:10px 14px">
+          <div style="font-size:0.68rem;font-weight:700;color:var(--text-dim);letter-spacing:.05em;margin-bottom:4px">DIET</div>
+          <div style="font-weight:700;font-size:0.88rem" id="prof-diet-val">—</div>
+          <span class="locked-badge" style="margin-top:4px">&#x1F512; Locked</span>
+        </div>
+        <div style="flex:1;min-width:120px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:10px 14px">
+          <div style="font-size:0.68rem;font-weight:700;color:var(--text-dim);letter-spacing:.05em;margin-bottom:4px">GOAL</div>
+          <div style="font-weight:700;font-size:0.88rem" id="prof-goal-val">—</div>
+          <span class="locked-badge" style="margin-top:4px">&#x1F512; Locked</span>
+        </div>
+      </div>
+    </div>
+
     <div class="profile-section-title">Personal Info</div>
     <input class="auth-input" type="text" id="prof-name" placeholder="Full name" />
     <div class="profile-grid">
@@ -875,27 +931,34 @@ function onAuthSuccess(data) {
   localStorage.setItem(AUTH_KEY, AUTH_TOKEN);
   localStorage.setItem(USER_KEY, JSON.stringify(currentUser));
 
-  // Sync goals from server into local store
   store = loadStore();
   if (!store.goals) store.goals = {};
-  store.goals.protein = currentUser.goals.protein;
-  store.goals.carbs   = currentUser.goals.carbs;
-  store.goals.fat     = currentUser.goals.fat;
+  var g = (currentUser.goals) || {};
+  store.goals.protein = g.protein || 150;
+  store.goals.carbs   = g.carbs   || 200;
+  store.goals.fat     = g.fat     || 65;
   if (!store.meals) store.meals = {};
   saveStore();
 
-  // Pull meals from server (overwrites localStorage meals with server truth)
-  syncMealsFromServer();
-
   document.getElementById('auth-overlay').style.display = 'none';
-  document.getElementById('btn-profile').style.display  = '';
-  var initials = (currentUser.name || currentUser.username).charAt(0).toUpperCase();
-  document.getElementById('user-avatar').textContent = initials;
-  document.getElementById('user-label').textContent  = currentUser.name || currentUser.username;
+
+  if (!currentUser.onboarding_completed) {
+    document.getElementById('onboarding-overlay').style.display = 'flex';
+    return;
+  }
+  _showMainApp();
+}
+
+function _showMainApp() {
+  syncMealsFromServer();
+  document.getElementById('btn-profile').style.display = '';
+  var label = currentUser.name || currentUser.email || currentUser.username || '?';
+  document.getElementById('user-avatar').textContent = label.charAt(0).toUpperCase();
+  document.getElementById('user-label').textContent  = label;
   render();
 }
 
-// Login
+// ── Login ──────────────────────────────────────────────────────────────────────────────────
 document.getElementById('btn-login').onclick = function() {
   var btn = this;
   btn.disabled = true; btn.textContent = 'Signing in…';
@@ -903,7 +966,7 @@ document.getElementById('btn-login').onclick = function() {
   fetch(API_BASE + '/auth/login', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      username: document.getElementById('login-username').value.trim(),
+      email:    document.getElementById('login-email').value.trim(),
       password: document.getElementById('login-password').value,
     }),
   })
@@ -921,40 +984,22 @@ document.getElementById('btn-login').onclick = function() {
 document.getElementById('login-password').addEventListener('keydown', function(e) {
   if (e.key === 'Enter') document.getElementById('btn-login').click();
 });
+document.getElementById('login-email').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') document.getElementById('login-password').focus();
+});
 
-// Register step navigation
-var _regUsername = '', _regPassword = '';
-document.getElementById('btn-reg-next').onclick = function() {
-  _regUsername = document.getElementById('reg-username').value.trim();
-  _regPassword = document.getElementById('reg-password').value;
-  setAuthError('reg-error', '');
-  if (_regUsername.length < 3) { setAuthError('reg-error', 'Username must be at least 3 characters'); return; }
-  if (_regPassword.length < 6) { setAuthError('reg-error', 'Password must be at least 6 characters'); return; }
-  document.getElementById('reg-step1').style.display = 'none';
-  document.getElementById('reg-step2').style.display = '';
-  document.getElementById('reg-step-label').textContent = 'Step 2 of 2 \u2014 Your profile';
-};
-document.getElementById('btn-reg-back').onclick = function() {
-  document.getElementById('reg-step1').style.display = '';
-  document.getElementById('reg-step2').style.display = 'none';
-  document.getElementById('reg-step-label').textContent = 'Step 1 of 2 \u2014 Create your account';
-};
-
+// ── Register ─────────────────────────────────────────────────────────────────────────────────
 document.getElementById('btn-reg-submit').onclick = function() {
-  var btn = this;
-  btn.disabled = true; btn.textContent = 'Creating account…';
+  var btn  = this;
+  var email    = document.getElementById('reg-email').value.trim();
+  var password = document.getElementById('reg-password').value;
   setAuthError('reg-error', '');
+  if (!email.includes('@') || !email.includes('.')) { setAuthError('reg-error', 'Enter a valid email address'); return; }
+  if (password.length < 6) { setAuthError('reg-error', 'Password must be at least 6 characters'); return; }
+  btn.disabled = true; btn.textContent = 'Creating account…';
   fetch(API_BASE + '/auth/register', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      username:  _regUsername,
-      password:  _regPassword,
-      name:      document.getElementById('reg-name').value.trim(),
-      age:       parseInt(document.getElementById('reg-age').value) || null,
-      gender:    document.getElementById('reg-gender').value || null,
-      weight_kg: parseFloat(document.getElementById('reg-weight').value) || null,
-      height_cm: parseFloat(document.getElementById('reg-height').value) || null,
-    }),
+    body: JSON.stringify({ email: email, password: password }),
   })
   .then(function(r) {
     return r.text().then(function(t) {
@@ -963,13 +1008,65 @@ document.getElementById('btn-reg-submit').onclick = function() {
     });
   })
   .then(function(res) {
-    btn.disabled = false; btn.textContent = 'Create Account';
+    btn.disabled = false; btn.textContent = 'Create Account →';
     if (!res.ok) { setAuthError('reg-error', res.d.detail || 'Registration failed'); return; }
     onAuthSuccess(res.d);
   })
   .catch(function(err) {
-    btn.disabled = false; btn.textContent = 'Create Account';
+    btn.disabled = false; btn.textContent = 'Create Account →';
     setAuthError('reg-error', 'Network error – ' + (err.message || 'check connection'));
+  });
+};
+document.getElementById('reg-password').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') document.getElementById('btn-reg-submit').click();
+});
+
+// ── Onboarding ─────────────────────────────────────────────────────────────────────────────
+var _obDiet = null, _obGoal = null;
+
+document.querySelectorAll('.ob-card').forEach(function(card) {
+  card.addEventListener('click', function() {
+    var group = card.dataset.group;
+    document.querySelectorAll('.ob-card[data-group="' + group + '"]').forEach(function(c) {
+      c.classList.remove('selected');
+    });
+    card.classList.add('selected');
+    if (group === 'diet') _obDiet = card.dataset.val;
+    if (group === 'goal') _obGoal = card.dataset.val;
+    var submitBtn = document.getElementById('btn-onboarding-submit');
+    if (_obDiet && _obGoal) {
+      submitBtn.disabled = false;
+      submitBtn.style.opacity = '1';
+      submitBtn.style.cursor  = 'pointer';
+      submitBtn.textContent   = 'Confirm & Continue →';
+    }
+  });
+});
+
+document.getElementById('btn-onboarding-submit').onclick = function() {
+  if (!_obDiet || !_obGoal) return;
+  var btn = this;
+  btn.disabled = true; btn.textContent = 'Saving…';
+  document.getElementById('onboarding-error').textContent = '';
+  fetch(API_BASE + '/auth/onboarding', {
+    method: 'POST', headers: authHeaders(),
+    body: JSON.stringify({ diet_preference: _obDiet, fitness_goal: _obGoal }),
+  })
+  .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, d: d }; }); })
+  .then(function(res) {
+    if (!res.ok) {
+      btn.disabled = false; btn.textContent = 'Confirm & Continue →';
+      document.getElementById('onboarding-error').textContent = res.d.detail || 'Error saving preferences';
+      return;
+    }
+    currentUser = res.d;
+    localStorage.setItem(USER_KEY, JSON.stringify(currentUser));
+    document.getElementById('onboarding-overlay').style.display = 'none';
+    _showMainApp();
+  })
+  .catch(function() {
+    btn.disabled = false; btn.textContent = 'Confirm & Continue →';
+    document.getElementById('onboarding-error').textContent = 'Network error – please try again';
   });
 };
 
@@ -981,13 +1078,21 @@ document.getElementById('btn-profile').onclick = function() {
   document.getElementById('prof-gender').value  = currentUser.gender  || '';
   document.getElementById('prof-weight').value  = currentUser.weight_kg || '';
   document.getElementById('prof-height').value  = currentUser.height_cm || '';
-  document.getElementById('prof-g-protein').value = currentUser.goals.protein;
-  document.getElementById('prof-g-carbs').value   = currentUser.goals.carbs;
-  document.getElementById('prof-g-fat').value     = currentUser.goals.fat;
+  document.getElementById('prof-g-protein').value = (currentUser.goals || {}).protein || 150;
+  document.getElementById('prof-g-carbs').value   = (currentUser.goals || {}).carbs   || 200;
+  document.getElementById('prof-g-fat').value     = (currentUser.goals || {}).fat     || 65;
   document.getElementById('prof-pw-current').value = '';
   document.getElementById('prof-pw-new').value     = '';
   document.getElementById('prof-pw-confirm').value = '';
   setAuthError('prof-error', '');
+  // Show locked preferences if onboarding is complete
+  var DIET_LABELS = { VEG: '🥦 Veg', NON_VEG: '🍗 Non-Veg', EGGETARIAN: '🥚 Eggetarian' };
+  var GOAL_LABELS = { LEAN_GAIN: '💪 Lean Muscle', FAT_LOSS: '🔥 Cutting Fat', MAINTENANCE: '⚖ Maintenance' };
+  if (currentUser.onboarding_completed) {
+    document.getElementById('prof-locked-section').style.display = '';
+    document.getElementById('prof-diet-val').textContent = DIET_LABELS[currentUser.diet_preference] || currentUser.diet_preference || '—';
+    document.getElementById('prof-goal-val').textContent = GOAL_LABELS[currentUser.fitness_goal]    || currentUser.fitness_goal    || '—';
+  }
   openModal('modal-profile');
 };
 document.getElementById('btn-profile-cancel').onclick = function() { closeModal('modal-profile'); };

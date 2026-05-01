@@ -68,7 +68,7 @@ def _init_db() -> None:
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     id            SERIAL PRIMARY KEY,
-                    username      VARCHAR(50)  UNIQUE NOT NULL,
+                    username      VARCHAR(255) UNIQUE NOT NULL,
                     password_hash TEXT         NOT NULL,
                     name          VARCHAR(100) DEFAULT '',
                     age           INTEGER,
@@ -78,9 +78,21 @@ def _init_db() -> None:
                     goals_protein REAL DEFAULT 150,
                     goals_carbs   REAL DEFAULT 200,
                     goals_fat     REAL DEFAULT 65,
-                    created_at    TIMESTAMPTZ  DEFAULT NOW()
+                    created_at    TIMESTAMPTZ  DEFAULT NOW(),
+                    email                TEXT,
+                    diet_preference      VARCHAR(20),
+                    fitness_goal         VARCHAR(20),
+                    onboarding_completed BOOLEAN DEFAULT FALSE
                 )
             """)
+            # Migration: add new columns to existing tables if they don't exist
+            for col_sql in [
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS diet_preference VARCHAR(20)",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS fitness_goal VARCHAR(20)",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_completed BOOLEAN DEFAULT FALSE",
+            ]:
+                cur.execute(col_sql)
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS meals (
                     username VARCHAR(50) NOT NULL,
@@ -235,19 +247,24 @@ async def _global_exc(request: Request, exc: Exception):
 
 # ── Auth Schemas ───────────────────────────────────────────────────────────
 
+DIET_PREFS    = {'VEG', 'NON_VEG', 'EGGETARIAN'}
+FITNESS_GOALS = {'LEAN_GAIN', 'FAT_LOSS', 'MAINTENANCE'}
+_EMAIL_RE     = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+
+
 class RegisterRequest(BaseModel):
-    username: str
+    email:    str
     password: str
-    name:     str = ''
-    age:      Optional[int] = None
-    gender:   Optional[str] = None
-    weight_kg: Optional[float] = None
-    height_cm: Optional[float] = None
 
 
 class LoginRequest(BaseModel):
-    username: str
+    email:    str
     password: str
+
+
+class OnboardingRequest(BaseModel):
+    diet_preference: str
+    fitness_goal:    str
 
 
 class ProfileUpdate(BaseModel):
@@ -264,6 +281,27 @@ class ProfileUpdate(BaseModel):
 class PasswordChange(BaseModel):
     current_password: str
     new_password: str
+
+
+def _user_dict(u: dict) -> dict:
+    """Serialise a DB user row to the standard API shape."""
+    return {
+        'username':             u['username'],
+        'email':                u.get('email') or u['username'],
+        'name':                 u.get('name') or '',
+        'age':                  u.get('age'),
+        'gender':               u.get('gender'),
+        'weight_kg':            u.get('weight_kg'),
+        'height_cm':            u.get('height_cm'),
+        'diet_preference':      u.get('diet_preference'),
+        'fitness_goal':         u.get('fitness_goal'),
+        'onboarding_completed': bool(u.get('onboarding_completed')),
+        'goals': {
+            'protein': u.get('goals_protein', 150),
+            'carbs':   u.get('goals_carbs',   200),
+            'fat':     u.get('goals_fat',      65),
+        },
+    }
 
 
 # ── Suggest / Lookup Schemas ───────────────────────────────────────────────
@@ -416,84 +454,83 @@ def _lookup_nutrition(food_name: str) -> dict:
 @app.post('/auth/register', status_code=201)
 def register(req: RegisterRequest):
     _require_db()
-    if len(req.username) < 3:
-        raise HTTPException(400, 'Username must be at least 3 characters')
+    email = req.email.strip().lower()
+    if not _EMAIL_RE.match(email):
+        raise HTTPException(400, 'Please enter a valid email address')
     if len(req.password) < 6:
         raise HTTPException(400, 'Password must be at least 6 characters')
 
-    goals = _calc_suggested_goals(req.weight_kg, req.height_cm, req.age, req.gender)
     conn = _db()
     try:
         with conn:
             with conn.cursor() as cur:
                 try:
                     cur.execute(
-                        """INSERT INTO users
-                           (username, password_hash, name, age, gender, weight_kg, height_cm,
-                            goals_protein, goals_carbs, goals_fat)
-                           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                        (req.username, _hash_password(req.password),
-                         req.name, req.age, req.gender, req.weight_kg, req.height_cm,
-                         goals['protein'], goals['carbs'], goals['fat'])
+                        """INSERT INTO users (username, email, password_hash, onboarding_completed)
+                           VALUES (%s, %s, %s, FALSE)""",
+                        (email, email, _hash_password(req.password))
                     )
                 except psycopg2.errors.UniqueViolation:
-                    raise HTTPException(409, 'Username already taken')
+                    raise HTTPException(409, 'An account with this email already exists')
+                cur.execute('SELECT * FROM users WHERE username = %s', (email,))
+                user = dict(cur.fetchone())
     finally:
         conn.close()
 
-    token = _create_token(req.username)
-    return {
-        'token': token,
-        'user': {
-            'username': req.username, 'name': req.name,
-            'age': req.age, 'gender': req.gender,
-            'weight_kg': req.weight_kg, 'height_cm': req.height_cm,
-            'goals': goals,
-        }
-    }
+    return {'token': _create_token(email), 'user': _user_dict(user)}
 
 
 @app.post('/auth/login')
 def login(req: LoginRequest):
     _require_db()
+    email = req.email.strip().lower()
     conn = _db()
     try:
         with conn.cursor() as cur:
-            cur.execute('SELECT * FROM users WHERE username = %s', (req.username,))
+            # Match by email column first, fall back to username for existing accounts
+            cur.execute(
+                'SELECT * FROM users WHERE email = %s OR username = %s LIMIT 1',
+                (email, email)
+            )
             user = cur.fetchone()
     finally:
         conn.close()
 
     if not user or not _verify_password(req.password, user['password_hash']):
-        raise HTTPException(401, 'Invalid username or password')
+        raise HTTPException(401, 'Invalid email or password')
 
-    return {
-        'token': _create_token(req.username),
-        'user': {
-            'username': user['username'], 'name': user['name'],
-            'age': user['age'], 'gender': user['gender'],
-            'weight_kg': user['weight_kg'], 'height_cm': user['height_cm'],
-            'goals': {
-                'protein': user['goals_protein'],
-                'carbs':   user['goals_carbs'],
-                'fat':     user['goals_fat'],
-            },
-        }
-    }
+    return {'token': _create_token(user['username']), 'user': _user_dict(dict(user))}
 
 
 @app.get('/auth/me')
 def me(user: dict = Depends(_get_user_from_token)):
-    return {
-        'username': user['username'], 'name': user['name'],
-        'age': user['age'], 'gender': user['gender'],
-        'weight_kg': user['weight_kg'], 'height_cm': user['height_cm'],
-        'goals': {
-            'protein': user['goals_protein'],
-            'carbs':   user['goals_carbs'],
-            'fat':     user['goals_fat'],
-        },
-    }
+    return _user_dict(user)
+
+
+@app.post('/auth/onboarding')
+def complete_onboarding(req: OnboardingRequest, user: dict = Depends(_get_user_from_token)):
+    if req.diet_preference not in DIET_PREFS:
+        raise HTTPException(400, f'diet_preference must be one of: {", ".join(sorted(DIET_PREFS))}')
+    if req.fitness_goal not in FITNESS_GOALS:
+        raise HTTPException(400, f'fitness_goal must be one of: {", ".join(sorted(FITNESS_GOALS))}')
+    if user.get('onboarding_completed'):
+        raise HTTPException(409, 'These preferences cannot be modified once set.')
+
+    conn = _db()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """UPDATE users SET diet_preference = %s, fitness_goal = %s,
+                       onboarding_completed = TRUE WHERE username = %s""",
+                    (req.diet_preference, req.fitness_goal, user['username'])
+                )
+                cur.execute('SELECT * FROM users WHERE username = %s', (user['username'],))
+                updated = dict(cur.fetchone())
+    finally:
+        conn.close()
+
+    return _user_dict(updated)
 
 
 @app.put('/auth/profile')
@@ -520,16 +557,7 @@ def update_profile(req: ProfileUpdate, user: dict = Depends(_get_user_from_token
                 updated = dict(cur.fetchone())
     finally:
         conn.close()
-    return {
-        'username': updated['username'], 'name': updated['name'],
-        'age': updated['age'], 'gender': updated['gender'],
-        'weight_kg': updated['weight_kg'], 'height_cm': updated['height_cm'],
-        'goals': {
-            'protein': updated['goals_protein'],
-            'carbs':   updated['goals_carbs'],
-            'fat':     updated['goals_fat'],
-        },
-    }
+    return _user_dict(updated)
 
 
 @app.put('/auth/password')
