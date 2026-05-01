@@ -570,9 +570,18 @@
         <option value="other">Other</option>
       </select>
     </div>
-    <div class="auth-row" style="margin-top:10px;margin-bottom:18px">
-      <input class="auth-input" type="number" id="ob-weight" placeholder="Weight (kg)" step="0.1" />
+    <div class="auth-row" style="margin-top:10px">
+      <input class="auth-input" type="number" id="ob-weight" placeholder="Weight (kg) *" step="0.1" />
       <input class="auth-input" type="number" id="ob-height" placeholder="Height (cm)" step="0.1" />
+    </div>
+    <div style="margin-top:10px;margin-bottom:18px">
+      <select class="auth-input" id="ob-activity">
+        <option value="">Activity level *</option>
+        <option value="sedentary">&#x1F6CB; Sedentary (desk job, no exercise)</option>
+        <option value="light">&#x1F6B6; Light (1–3 days/week)</option>
+        <option value="moderate">&#x1F3C3; Moderate (3–5 days/week)</option>
+        <option value="high">&#x26A1; High (6–7 days/week)</option>
+      </select>
     </div>
 
     <div class="auth-error" id="onboarding-error"></div>
@@ -841,20 +850,30 @@
           <label style="font-size:0.72rem;font-weight:700;color:var(--text-dim);letter-spacing:.05em">DIET</label>
           <select class="auth-input" id="prof-diet">
             <option value="">Select diet</option>
-            <option value="VEG">🥦 Vegetarian</option>
-            <option value="NON_VEG">🍗 Non-Vegetarian</option>
-            <option value="EGGETARIAN">🥚 Eggetarian</option>
+            <option value="VEG">&#x1F966; Vegetarian</option>
+            <option value="NON_VEG">&#x1F357; Non-Vegetarian</option>
+            <option value="EGGETARIAN">&#x1F95A; Eggetarian</option>
           </select>
         </div>
         <div class="form-group">
           <label style="font-size:0.72rem;font-weight:700;color:var(--text-dim);letter-spacing:.05em">FITNESS GOAL</label>
           <select class="auth-input" id="prof-goal">
             <option value="">Select goal</option>
-            <option value="LEAN_GAIN">💪 Lean Muscle</option>
-            <option value="FAT_LOSS">🔥 Cutting Fat</option>
-            <option value="MAINTENANCE">⚖ Maintenance</option>
+            <option value="LEAN_GAIN">&#x1F4AA; Lean Muscle</option>
+            <option value="FAT_LOSS">&#x1F525; Cutting Fat</option>
+            <option value="MAINTENANCE">&#x2696; Maintenance</option>
           </select>
         </div>
+      </div>
+      <div class="form-group" style="margin-top:10px">
+        <label style="font-size:0.72rem;font-weight:700;color:var(--text-dim);letter-spacing:.05em">ACTIVITY LEVEL</label>
+        <select class="auth-input" id="prof-activity">
+          <option value="">Select activity level</option>
+          <option value="sedentary">&#x1F6CB; Sedentary (desk job, no exercise)</option>
+          <option value="light">&#x1F6B6; Light (1–3 days/week)</option>
+          <option value="moderate">&#x1F3C3; Moderate (3–5 days/week)</option>
+          <option value="high">&#x26A1; High (6–7 days/week)</option>
+        </select>
       </div>
     </div>
 
@@ -1031,7 +1050,7 @@ document.getElementById('btn-reg-submit').onclick = function() {
   })
   .then(function(res) {
     btn.disabled = false; btn.textContent = 'Create Account →';
-    if (!res.ok) { setAuthError('reg-error', res.d.detail || 'Registration failed'); return; }
+    if (!res.ok) { setAuthError('reg-error', typeof res.d.detail === 'string' ? res.d.detail : (Array.isArray(res.d.detail) ? res.d.detail.map(function(e){return e.msg||e;}).join('; ') : 'Registration failed')); return; }
     onAuthSuccess(res.d);
   })
   .catch(function(err) {
@@ -1046,6 +1065,26 @@ document.getElementById('reg-password').addEventListener('keydown', function(e) 
 // ── Onboarding ─────────────────────────────────────────────────────────────────────────────
 var _obDiet = null, _obGoal = null;
 
+function _obCheckReady() {
+  var submitBtn = document.getElementById('btn-onboarding-submit');
+  var weight    = parseFloat(document.getElementById('ob-weight').value);
+  var activity  = document.getElementById('ob-activity').value;
+  var errEl     = document.getElementById('onboarding-error');
+  // Lean + sedentary → block
+  if (_obGoal === 'LEAN_GAIN' && activity === 'sedentary') {
+    errEl.textContent = 'Lean gaining requires at least Light activity level.';
+    submitBtn.disabled = true; submitBtn.style.opacity = '.5'; submitBtn.style.cursor = 'not-allowed';
+    return;
+  } else {
+    errEl.textContent = '';
+  }
+  var ready = _obDiet && _obGoal && weight > 0 && activity;
+  submitBtn.disabled      = !ready;
+  submitBtn.style.opacity = ready ? '1' : '.5';
+  submitBtn.style.cursor  = ready ? 'pointer' : 'not-allowed';
+  submitBtn.textContent   = ready ? 'Confirm & Continue →' : 'Fill weight & activity to continue';
+}
+
 document.querySelectorAll('.ob-card').forEach(function(card) {
   card.addEventListener('click', function() {
     var group = card.dataset.group;
@@ -1055,28 +1094,28 @@ document.querySelectorAll('.ob-card').forEach(function(card) {
     card.classList.add('selected');
     if (group === 'diet') _obDiet = card.dataset.val;
     if (group === 'goal') _obGoal = card.dataset.val;
-    var submitBtn = document.getElementById('btn-onboarding-submit');
-    if (_obDiet && _obGoal) {
-      submitBtn.disabled = false;
-      submitBtn.style.opacity = '1';
-      submitBtn.style.cursor  = 'pointer';
-      submitBtn.textContent   = 'Confirm & Continue →';
-    }
+    _obCheckReady();
   });
 });
+document.getElementById('ob-weight').addEventListener('input', _obCheckReady);
+document.getElementById('ob-activity').addEventListener('change', _obCheckReady);
 
 document.getElementById('btn-onboarding-submit').onclick = function() {
   if (!_obDiet || !_obGoal) return;
+  var weight   = parseFloat(document.getElementById('ob-weight').value);
+  var activity = document.getElementById('ob-activity').value;
+  if (!weight || !activity) { document.getElementById('onboarding-error').textContent = 'Weight and activity level are required.'; return; }
   var btn = this;
   btn.disabled = true; btn.textContent = 'Saving…';
   document.getElementById('onboarding-error').textContent = '';
   var obPayload = {
     diet_preference: _obDiet,
     fitness_goal:    _obGoal,
+    activity:  activity,
     name:      document.getElementById('ob-name').value.trim() || null,
     age:       parseInt(document.getElementById('ob-age').value) || null,
     gender:    document.getElementById('ob-gender').value || null,
-    weight_kg: parseFloat(document.getElementById('ob-weight').value) || null,
+    weight_kg: weight,
     height_cm: parseFloat(document.getElementById('ob-height').value) || null,
   };
   fetch(API_BASE + '/auth/onboarding', {
@@ -1119,8 +1158,9 @@ document.getElementById('btn-profile').onclick = function() {
   // Show preference dropdowns if onboarding is complete
   if (currentUser.onboarding_completed) {
     document.getElementById('prof-prefs-section').style.display = '';
-    document.getElementById('prof-diet').value = currentUser.diet_preference || '';
-    document.getElementById('prof-goal').value = currentUser.fitness_goal    || '';
+    document.getElementById('prof-diet').value     = currentUser.diet_preference || '';
+    document.getElementById('prof-goal').value     = currentUser.fitness_goal    || '';
+    document.getElementById('prof-activity').value = currentUser.activity        || '';
   }
   openModal('modal-profile');
 };
@@ -1148,8 +1188,9 @@ document.getElementById('btn-profile-save').onclick = function() {
     goals_protein: parseFloat(document.getElementById('prof-g-protein').value) || null,
     goals_carbs:   parseFloat(document.getElementById('prof-g-carbs').value)   || null,
     goals_fat:     parseFloat(document.getElementById('prof-g-fat').value)     || null,
-    diet_preference: document.getElementById('prof-diet') ? (document.getElementById('prof-diet').value || null) : null,
-    fitness_goal:    document.getElementById('prof-goal') ? (document.getElementById('prof-goal').value || null) : null,
+    diet_preference: document.getElementById('prof-diet')     ? (document.getElementById('prof-diet').value     || null) : null,
+    fitness_goal:    document.getElementById('prof-goal')     ? (document.getElementById('prof-goal').value     || null) : null,
+    activity:        document.getElementById('prof-activity') ? (document.getElementById('prof-activity').value || null) : null,
   };
 
   var chain = fetch(API_BASE + '/auth/profile', {
@@ -1176,7 +1217,8 @@ document.getElementById('btn-profile-save').onclick = function() {
         weight_kg: res.d.weight_kg, height_cm: res.d.height_cm,
         goals: res.d.goals,
         diet_preference: res.d.diet_preference,
-        fitness_goal: res.d.fitness_goal,
+        fitness_goal:    res.d.fitness_goal,
+        activity:        res.d.activity,
       });
     }
     localStorage.setItem(USER_KEY, JSON.stringify(currentUser));

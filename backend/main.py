@@ -82,6 +82,7 @@ def _init_db() -> None:
                     email                TEXT,
                     diet_preference      VARCHAR(20),
                     fitness_goal         VARCHAR(20),
+                    activity             VARCHAR(20),
                     onboarding_completed BOOLEAN DEFAULT FALSE
                 )
             """)
@@ -90,6 +91,7 @@ def _init_db() -> None:
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT",
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS diet_preference VARCHAR(20)",
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS fitness_goal VARCHAR(20)",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS activity VARCHAR(20)",
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_completed BOOLEAN DEFAULT FALSE",
             ]:
                 cur.execute(col_sql)
@@ -152,19 +154,43 @@ def _get_user_from_token(authorization: Optional[str] = Header(default=None)) ->
     return dict(user)
 
 
-def _calc_suggested_goals(weight_kg, height_cm, age, gender) -> dict:
-    """Mifflin-St Jeor BMR × 1.55 activity → macro split."""
-    if not all([weight_kg, height_cm, age]):
-        return {'protein': 150, 'carbs': 200, 'fat': 65}
-    if gender == 'female':
-        bmr = 10 * weight_kg + 6.25 * height_cm - 5 * age - 161
-    else:
-        bmr = 10 * weight_kg + 6.25 * height_cm - 5 * age + 5
-    tdee = bmr * 1.55
-    protein = round(weight_kg * 1.6)
-    fat     = round(tdee * 0.25 / 9)
-    carbs   = round((tdee - protein * 4 - fat * 9) / 4)
-    return {'protein': max(protein, 50), 'carbs': max(carbs, 50), 'fat': max(fat, 30)}
+def _calc_suggested_goals(weight_kg, fitness_goal, activity) -> dict:
+    """BLS framework: weight_lbs × goal×activity multiplier → calories → macros."""
+    _DEFAULTS = {'protein': 150, 'carbs': 200, 'fat': 65, 'calories': 2000}
+    if not weight_kg or not activity or not fitness_goal:
+        return _DEFAULTS
+
+    # Map stored enum → formula key
+    GOAL_MAP = {'LEAN_GAIN': 'lean', 'FAT_LOSS': 'cut', 'MAINTENANCE': 'maintain',
+                'lean': 'lean', 'cut': 'cut', 'maintain': 'maintain'}
+    goal = GOAL_MAP.get(fitness_goal)
+    if not goal:
+        return _DEFAULTS
+
+    MULTIPLIERS = {
+        'cut':      {'sedentary': 8,    'light': 10, 'moderate': 12, 'high': 14},
+        'lean':     {'sedentary': None, 'light': 16, 'moderate': 18, 'high': 20},
+        'maintain': {'sedentary': 12,   'light': 14, 'moderate': 16, 'high': 18},
+    }
+
+    if goal == 'lean' and activity == 'sedentary':
+        raise ValueError('Lean gaining requires at least light activity level')
+
+    multiplier = MULTIPLIERS.get(goal, {}).get(activity)
+    if not multiplier:
+        return _DEFAULTS
+
+    weight_lbs = weight_kg * 2.2046
+    calories   = round(weight_lbs * multiplier)
+
+    is_very_overweight = weight_kg > 100
+    protein_per_lb = (0.7 if is_very_overweight else 1.1) if goal == 'cut' else 0.9
+    protein_g = round(weight_lbs * protein_per_lb)
+
+    fat_g   = round((calories * 0.25) / 9)
+    carbs_g = max(0, round((calories - protein_g * 4 - fat_g * 9) / 4))
+
+    return {'protein': protein_g, 'carbs': carbs_g, 'fat': fat_g, 'calories': calories}
 
 
 # ── BM25 helpers ───────────────────────────────────────────────────────────
@@ -247,9 +273,10 @@ async def _global_exc(request: Request, exc: Exception):
 
 # ── Auth Schemas ───────────────────────────────────────────────────────────
 
-DIET_PREFS    = {'VEG', 'NON_VEG', 'EGGETARIAN'}
-FITNESS_GOALS = {'LEAN_GAIN', 'FAT_LOSS', 'MAINTENANCE'}
-_EMAIL_RE     = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+DIET_PREFS       = {'VEG', 'NON_VEG', 'EGGETARIAN'}
+FITNESS_GOALS    = {'LEAN_GAIN', 'FAT_LOSS', 'MAINTENANCE'}
+VALID_ACTIVITIES = {'sedentary', 'light', 'moderate', 'high'}
+_EMAIL_RE        = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
 
 
 class RegisterRequest(BaseModel):
@@ -265,6 +292,7 @@ class LoginRequest(BaseModel):
 class OnboardingRequest(BaseModel):
     diet_preference: str
     fitness_goal:    str
+    activity:  Optional[str]   = None
     name:      Optional[str]   = None
     age:       Optional[int]   = None
     gender:    Optional[str]   = None
@@ -283,6 +311,7 @@ class ProfileUpdate(BaseModel):
     goals_fat:       Optional[float] = None
     diet_preference: Optional[str]   = None
     fitness_goal:    Optional[str]   = None
+    activity:        Optional[str]   = None
 
 
 class PasswordChange(BaseModel):
@@ -302,6 +331,7 @@ def _user_dict(u: dict) -> dict:
         'height_cm':            u.get('height_cm'),
         'diet_preference':      u.get('diet_preference'),
         'fitness_goal':         u.get('fitness_goal'),
+        'activity':             u.get('activity'),
         'onboarding_completed': bool(u.get('onboarding_completed')),
         'goals': {
             'protein': u.get('goals_protein', 150),
@@ -520,10 +550,15 @@ def complete_onboarding(req: OnboardingRequest, user: dict = Depends(_get_user_f
         raise HTTPException(400, f'diet_preference must be one of: {", ".join(sorted(DIET_PREFS))}')
     if req.fitness_goal not in FITNESS_GOALS:
         raise HTTPException(400, f'fitness_goal must be one of: {", ".join(sorted(FITNESS_GOALS))}')
+    if req.activity and req.activity not in VALID_ACTIVITIES:
+        raise HTTPException(400, f'activity must be one of: {", ".join(sorted(VALID_ACTIVITIES))}')
     # Preferences are updatable; only email is immutable (used as login identifier)
 
-    # Calculate suggested macro goals from body stats if provided
-    suggested = _calc_suggested_goals(req.weight_kg, req.height_cm, req.age, req.gender)
+    # Calculate macro goals using BLS formula (requires weight + activity + goal)
+    try:
+        suggested = _calc_suggested_goals(req.weight_kg, req.fitness_goal, req.activity)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
     conn = _db()
     try:
@@ -531,20 +566,22 @@ def complete_onboarding(req: OnboardingRequest, user: dict = Depends(_get_user_f
             with conn.cursor() as cur:
                 cur.execute(
                     """UPDATE users SET
-                         diet_preference    = %s,
-                         fitness_goal       = %s,
+                         diet_preference      = %s,
+                         fitness_goal         = %s,
+                         activity             = COALESCE(%s, activity),
                          onboarding_completed = TRUE,
-                         name               = COALESCE(%s, name),
-                         age                = COALESCE(%s, age),
-                         gender             = COALESCE(%s, gender),
-                         weight_kg          = COALESCE(%s, weight_kg),
-                         height_cm          = COALESCE(%s, height_cm),
-                         goals_protein      = %s,
-                         goals_carbs        = %s,
-                         goals_fat          = %s
+                         name                 = COALESCE(%s, name),
+                         age                  = COALESCE(%s, age),
+                         gender               = COALESCE(%s, gender),
+                         weight_kg            = COALESCE(%s, weight_kg),
+                         height_cm            = COALESCE(%s, height_cm),
+                         goals_protein        = %s,
+                         goals_carbs          = %s,
+                         goals_fat            = %s
                        WHERE username = %s""",
                     (
                         req.diet_preference, req.fitness_goal,
+                        req.activity,
                         req.name, req.age, req.gender, req.weight_kg, req.height_cm,
                         suggested['protein'], suggested['carbs'], suggested['fat'],
                         user['username'],
@@ -565,6 +602,24 @@ def update_profile(req: ProfileUpdate, user: dict = Depends(_get_user_from_token
         raise HTTPException(400, f'diet_preference must be one of: {", ".join(sorted(DIET_PREFS))}')
     if req.fitness_goal is not None and req.fitness_goal not in FITNESS_GOALS:
         raise HTTPException(400, f'fitness_goal must be one of: {", ".join(sorted(FITNESS_GOALS))}')
+    if req.activity is not None and req.activity not in VALID_ACTIVITIES:
+        raise HTTPException(400, f'activity must be one of: {", ".join(sorted(VALID_ACTIVITIES))}')
+
+    # Auto-recalculate goals when fitness-relevant stats change (weight, activity, goal)
+    # Use updated values or fall back to what's stored
+    new_weight   = req.weight_kg   or user.get('weight_kg')
+    new_activity = req.activity    or user.get('activity')
+    new_goal     = req.fitness_goal or user.get('fitness_goal')
+    # Only recalculate if the user didn't explicitly send manual goal values
+    manual_goals = req.goals_protein or req.goals_carbs or req.goals_fat
+    if not manual_goals and (req.weight_kg or req.activity or req.fitness_goal):
+        try:
+            recalc = _calc_suggested_goals(new_weight, new_goal, new_activity)
+            req.goals_protein = recalc['protein']
+            req.goals_carbs   = recalc['carbs']
+            req.goals_fat     = recalc['fat']
+        except ValueError as e:
+            raise HTTPException(400, str(e))
 
     fields, values = [], []
     for col, val in [
@@ -573,6 +628,7 @@ def update_profile(req: ProfileUpdate, user: dict = Depends(_get_user_from_token
         ('goals_protein', req.goals_protein), ('goals_carbs', req.goals_carbs),
         ('goals_fat', req.goals_fat),
         ('diet_preference', req.diet_preference), ('fitness_goal', req.fitness_goal),
+        ('activity', req.activity),
     ]:
         if val is not None:
             fields.append(f'{col} = %s')
