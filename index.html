@@ -1130,6 +1130,13 @@ document.getElementById('btn-onboarding-submit').onclick = function() {
       return;
     }
     currentUser = res.d;
+    // Sync newly calculated macro goals into the local store
+    if (res.d.goals) {
+      store.goals.protein = res.d.goals.protein;
+      store.goals.carbs   = res.d.goals.carbs;
+      store.goals.fat     = res.d.goals.fat;
+      saveStore();
+    }
     localStorage.setItem(USER_KEY, JSON.stringify(currentUser));
     document.getElementById('onboarding-overlay').style.display = 'none';
     _showMainApp();
