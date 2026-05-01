@@ -1038,9 +1038,9 @@ function _showMainApp() {
 var WELCOME_KEY = 'mt_welcome_shown';
 
 var _GOAL_MSGS = {
-  LEAN_GAIN:   "We’ll help you build lean muscle with the right balance of protein, calories, and smart nutrition.",
+  LEAN_GAIN:   "We'll help you build lean muscle with the right balance of protein, calories, and smart nutrition.",
   FAT_LOSS:    "Your plan is designed to help you lose fat while maintaining strength and energy.",
-  MAINTENANCE: "We’ll help you stay fit, balanced, and consistent with smart nutrition choices."
+  MAINTENANCE: "We'll help you stay fit, balanced, and consistent with smart nutrition choices."
 };
 
 function _maybeShowWelcome() {
@@ -1051,27 +1051,27 @@ function _maybeShowWelcome() {
   document.getElementById('wc-title').textContent =
     'Welcome to your fitness journey, ' + name + '! 🚀';
   // Goal message
-  document.getElementById(‘wc-goal’).textContent =
+  document.getElementById('wc-goal').textContent =
     _GOAL_MSGS[currentUser.fitness_goal] ||
-    ‘Your personalised macro plan is ready. Let’s make every meal count.’;
+    "Your personalised macro plan is ready. Let's make every meal count.";
   // Macro targets chips
   var g = store.goals || {};
   var kcal = Math.round((g.protein || 0) * 4 + (g.carbs || 0) * 4 + (g.fat || 0) * 9);
   var chips = [
-    { label: ‘&#x1F525; Calories’, val: kcal + ‘ kcal’,  color: ‘#a78bfa’ },
-    { label: ‘&#x1F357; Protein’,  val: (g.protein || 0) + ‘g’, color: ‘#60a5fa’ },
-    { label: ‘&#x1F35E; Carbs’,    val: (g.carbs   || 0) + ‘g’, color: ‘#34d399’ },
-    { label: ‘&#x1F9C8; Fat’,      val: (g.fat     || 0) + ‘g’, color: ‘#fb923c’ },
+    { label: '&#x1F525; Calories', val: kcal + ' kcal',  color: '#a78bfa' },
+    { label: '&#x1F357; Protein',  val: (g.protein || 0) + 'g', color: '#60a5fa' },
+    { label: '&#x1F35E; Carbs',    val: (g.carbs   || 0) + 'g', color: '#34d399' },
+    { label: '&#x1F9C8; Fat',      val: (g.fat     || 0) + 'g', color: '#fb923c' },
   ];
-  var macroEl = document.getElementById(‘wc-macros’);
+  var macroEl = document.getElementById('wc-macros');
   macroEl.innerHTML = chips.map(function(c) {
-    return ‘<div style="flex:1;min-width:60px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:7px 10px;text-align:center">’
-      + ‘<div style="font-size:0.62rem;color:var(--text-dim);margin-bottom:3px">’ + c.label + ‘</div>’
-      + ‘<div style="font-size:0.85rem;font-weight:700;color:’ + c.color + ‘">’ + c.val + ‘</div>’
-      + ‘</div>’;
-  }).join(‘’);
+    return '<div style="flex:1;min-width:60px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:7px 10px;text-align:center">'
+      + '<div style="font-size:0.62rem;color:var(--text-dim);margin-bottom:3px">' + c.label + '</div>'
+      + '<div style="font-size:0.85rem;font-weight:700;color:' + c.color + '">' + c.val + '</div>'
+      + '</div>';
+  }).join('');
   // Show overlay
-  document.getElementById(‘welcome-overlay’).style.display = ‘flex’;
+  document.getElementById('welcome-overlay').style.display = 'flex';
 }
 
 function _dismissWelcome() {
