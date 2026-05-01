@@ -895,6 +895,13 @@
   </div>
 </section>
 
+<!-- ═══ Progress Section ═══════════════════════════════════════════════════ -->
+<section id="section-progress" style="display:none">
+  <div class="ex-inner" id="progress-inner">
+    <!-- populated by renderProgressTab() -->
+  </div>
+</section>
+
 <!-- ═══ FAB (context-aware) ═══════════════════════════════════════════════ -->
 <button class="fab" id="btn-fab">
   <span id="btn-fab-icon">+</span> <span id="btn-fab-label">Log Meal</span>
@@ -1743,7 +1750,14 @@ function shiftDate(n) {
   var d = new Date(currentDate + 'T12:00:00');
   d.setDate(d.getDate() + n);
   currentDate = makeKey(d);
-  render();
+  document.getElementById('date-label').textContent = formatDateLabel(currentDate);
+  if (_activeTab === 'nutrition') {
+    render();
+  } else if (_activeTab === 'exercise') {
+    renderExerciseTab();
+  } else if (_activeTab === 'progress') {
+    renderProgressTab();
+  }
 }
 
 function render() {
@@ -2742,10 +2756,9 @@ function switchTab(tab) {
   // Show/hide main sections
   document.getElementById('section-nutrition').style.display = tab === 'nutrition' ? '' : 'none';
   document.getElementById('section-exercise').style.display  = tab === 'exercise'  ? '' : 'none';
+  document.getElementById('section-progress').style.display  = tab === 'progress'  ? '' : 'none';
 
-  // Date nav only needed for nutrition
-  var dateNav = document.querySelector('.date-nav');
-  if (dateNav) dateNav.style.display = tab === 'nutrition' ? '' : 'none';
+  // Date nav is shared across all tabs — always visible
 
   // Tab bar highlight
   ['nutrition', 'exercise', 'progress'].forEach(function(t) {
@@ -2773,6 +2786,7 @@ function switchTab(tab) {
 
   // Render the active tab
   if (tab === 'exercise') renderExerciseTab();
+  if (tab === 'progress')  renderProgressTab();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -3148,6 +3162,161 @@ function submitActivity() {
 }
 
 render();
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ── PROGRESS TAB ───────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+
+function renderProgressTab() {
+  var container = document.getElementById('progress-inner');
+  if (!container) return;
+
+  // Gather weight logs from store
+  var weightLogs = store.weightLogs || {};
+  var dateKeys   = Object.keys(weightLogs).sort();
+
+  // Gather exercise history: scan all mt_ex_* localStorage keys
+  var exHistory = {};
+  for (var i = 0; i < localStorage.length; i++) {
+    var k = localStorage.key(i);
+    if (k && k.startsWith('mt_ex_')) {
+      var dateStr = k.replace('mt_ex_', '');
+      try { exHistory[dateStr] = JSON.parse(localStorage.getItem(k)); } catch(e) {}
+    }
+  }
+
+  // ── Selected date info ───────────────────────────────────────────────────
+  var selectedWeight = weightLogs[currentDate];
+  var selectedEx     = exHistory[currentDate] || {};
+  var selectedMeals  = (store.meals && store.meals[currentDate]) || [];
+  var totalKcalIn    = 0;
+  selectedMeals.forEach(function(m) { totalKcalIn += Math.round(m.protein*4 + m.carbs*4 + m.fat*9); });
+  var totalKcalBurned = selectedEx.totalCalories || 0;
+  var netKcal         = totalKcalIn - totalKcalBurned;
+
+  // ── Build weight trend (last 7 logged entries) ───────────────────────────
+  var recentWeights = dateKeys.slice(-7);
+  var wMin = recentWeights.length ? Math.min.apply(null, recentWeights.map(function(d){return weightLogs[d];})) : 0;
+  var wMax = recentWeights.length ? Math.max.apply(null, recentWeights.map(function(d){return weightLogs[d];})) : 1;
+  var wRange = wMax - wMin || 1;
+
+  function sparkBar(val) {
+    var pct = Math.round(((val - wMin) / wRange) * 100);
+    return '<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px">'
+      + '<div style="width:100%;background:var(--border);border-radius:4px 4px 0 0;overflow:hidden;height:48px;display:flex;align-items:flex-end">'
+      + '<div style="width:100%;height:' + Math.max(10, pct) + '%;background:var(--accent2);border-radius:4px 4px 0 0"></div>'
+      + '</div>'
+      + '<div style="font-size:0.6rem;color:var(--text-dim);white-space:nowrap">' + val + '</div>'
+      + '</div>';
+  }
+
+  // ── Build strength summary for selected date ─────────────────────────────
+  var workoutName = '';
+  var exRows = '';
+  if (selectedEx.workoutIndex != null && typeof selectedEx.workoutIndex !== 'undefined') {
+    var wData = (typeof WORKOUTS_DATA !== 'undefined') ? WORKOUTS_DATA[selectedEx.workoutIndex] : null;
+    if (wData) {
+      workoutName = wData.name;
+      wData.exercises.forEach(function(ex) {
+        var sd = selectedEx.setData && selectedEx.setData[ex.name];
+        if (!sd) return;
+        var setsLogged = sd.filter(function(s){ return s.weight || s.reps; });
+        if (!setsLogged.length) return;
+        var best = setsLogged.reduce(function(b,s){ return (parseFloat(s.weight)||0) > (parseFloat(b.weight)||0) ? s : b; }, setsLogged[0]);
+        exRows += '<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border)">'
+          + '<span style="font-size:0.85rem;color:var(--text)">' + ex.name + '</span>'
+          + '<span style="font-size:0.8rem;font-weight:700;color:var(--accent2)">'
+          + (best.weight ? best.weight + ' kg' : '') + (best.reps ? ' × ' + best.reps : '') + '</span>'
+          + '</div>';
+      });
+    }
+  }
+
+  // ── HTML ─────────────────────────────────────────────────────────────────
+  var html = '';
+
+  // Day summary card
+  html += '<div class="card" style="margin-top:20px">'
+    + '<div class="card-label">📅 ' + formatDateLabel(currentDate).toUpperCase() + ' — SUMMARY</div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:10px">'
+    + _progStatChip('🍽', totalKcalIn + ' kcal', 'Consumed', '#60a5fa')
+    + _progStatChip('🔥', totalKcalBurned + ' kcal', 'Burned', '#34d399')
+    + _progStatChip('⚖️', netKcal + ' kcal', 'Net', netKcal > 0 ? '#fb923c' : '#34d399')
+    + '</div>'
+    + '</div>';
+
+  // Weight card — log or show
+  html += '<div class="card" style="margin-top:12px">'
+    + '<div class="card-label">⚖️ BODY WEIGHT</div>';
+  if (selectedWeight) {
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">'
+      + '<div style="font-size:1.6rem;font-weight:800;color:var(--text)">' + selectedWeight + ' <span style="font-size:0.9rem;color:var(--text-dim)">kg</span></div>'
+      + '<button onclick="promptWeightLog()" style="font-size:0.75rem;padding:5px 12px;border-radius:8px;background:var(--border);color:var(--text-dim);border:none;cursor:pointer">Edit</button>'
+      + '</div>';
+  } else {
+    html += '<div style="margin-top:10px;text-align:center">'
+      + '<p style="font-size:0.85rem;color:var(--text-dim);margin-bottom:10px">No weight logged for this day.</p>'
+      + '<button onclick="promptWeightLog()" style="padding:8px 22px;border-radius:10px;background:var(--accent2);color:#fff;font-weight:700;border:none;cursor:pointer;font-size:0.85rem">+ Log Weight</button>'
+      + '</div>';
+  }
+
+  // Weight trend sparkline
+  if (recentWeights.length > 1) {
+    html += '<div style="display:flex;gap:6px;margin-top:14px;align-items:flex-end">';
+    recentWeights.forEach(function(d) { html += sparkBar(weightLogs[d]); });
+    html += '</div>';
+  }
+  html += '</div>';
+
+  // Exercise card
+  if (workoutName) {
+    html += '<div class="card" style="margin-top:12px">'
+      + '<div class="card-label">💪 WORKOUT — ' + workoutName.toUpperCase() + '</div>'
+      + (exRows || '<p style="font-size:0.85rem;color:var(--text-dim);margin-top:8px">No sets logged.</p>')
+      + (totalKcalBurned ? '<div style="margin-top:10px;padding:8px;background:rgba(52,211,153,.1);border-radius:8px;text-align:center;font-size:0.85rem;color:#34d399;font-weight:700">🔥 ' + totalKcalBurned + ' kcal burned</div>' : '')
+      + '</div>';
+  } else {
+    html += '<div class="card" style="margin-top:12px">'
+      + '<div class="card-label">💪 WORKOUT</div>'
+      + '<p style="font-size:0.85rem;color:var(--text-dim);margin-top:8px">No workout logged for this day. Head to the Exercise tab to log one.</p>'
+      + '</div>';
+  }
+
+  // Macro breakdown
+  if (selectedMeals.length) {
+    var tp = 0, tc = 0, tf = 0;
+    selectedMeals.forEach(function(m){ tp+=m.protein; tc+=m.carbs; tf+=m.fat; });
+    html += '<div class="card" style="margin-top:12px;margin-bottom:20px">'
+      + '<div class="card-label">🥗 MACRO BREAKDOWN</div>'
+      + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:10px">'
+      + _progStatChip('💙', Math.round(tp) + 'g', 'Protein', '#60a5fa')
+      + _progStatChip('💚', Math.round(tc) + 'g', 'Carbs', '#34d399')
+      + _progStatChip('🧡', Math.round(tf) + 'g', 'Fat', '#fb923c')
+      + '</div></div>';
+  }
+
+  container.innerHTML = html;
+}
+
+function _progStatChip(icon, val, label, color) {
+  return '<div style="background:var(--surface-alt,#1e2235);border-radius:10px;padding:10px 6px;text-align:center">'
+    + '<div style="font-size:1.1rem">' + icon + '</div>'
+    + '<div style="font-size:0.95rem;font-weight:800;color:' + color + ';margin:3px 0">' + val + '</div>'
+    + '<div style="font-size:0.65rem;color:var(--text-dim)">' + label + '</div>'
+    + '</div>';
+}
+
+function promptWeightLog() {
+  var current = (store.weightLogs && store.weightLogs[currentDate]) || '';
+  var val = prompt('Enter your weight for ' + formatDateLabel(currentDate) + ' (kg):', current);
+  if (val === null) return;
+  var num = parseFloat(val);
+  if (isNaN(num) || num <= 0) { alert('Please enter a valid weight.'); return; }
+  if (!store.weightLogs) store.weightLogs = {};
+  store.weightLogs[currentDate] = num;
+  localStorage.setItem(STORE_KEY, JSON.stringify(store));
+  renderProgressTab();
+}
 </script>
 </body>
 </html>
