@@ -605,18 +605,20 @@
     <!-- Goal Card -->
     <div style="background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:10px;text-align:left">
       <div style="font-size:0.68rem;font-weight:700;color:var(--accent2);letter-spacing:.08em;margin-bottom:6px">&#x1F3AF; YOUR PLAN</div>
-      <p id="wc-goal" style="font-size:0.87rem;color:var(--text);line-height:1.55;margin:0"></p>
+      <p id="wc-goal" style="font-size:0.87rem;color:var(--text);line-height:1.55;margin:0 0 10px"></p>
+      <!-- Macro targets row -->
+      <div id="wc-macros" style="display:flex;gap:8px;flex-wrap:wrap"></div>
     </div>
 
     <!-- Feature Card -->
     <div style="background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:10px;text-align:left">
-      <div style="font-size:0.68rem;font-weight:700;color:var(--accent2);letter-spacing:.08em;margin-bottom:6px">&#x1F37D; WHAT CAN I EAT?</div>
-      <p style="font-size:0.87rem;color:var(--text);line-height:1.55;margin:0">Instantly discover meals tailored to your diet &amp; remaining macros — no guesswork, just smart choices.</p>
+      <div style="font-size:0.87rem;font-weight:700;color:var(--text);margin-bottom:6px;line-height:1.4">No overthinking. Just smart meal choices.</div>
+      <p style="font-size:0.84rem;color:var(--text-dim);line-height:1.55;margin:0">Our &#x201C;What can I eat?&#x201D; feature lets you skip the confusion. Instantly find meals that fit your taste, diet, and macros.</p>
     </div>
 
     <!-- Motivation -->
-    <p style="font-size:0.84rem;color:var(--text-dim);line-height:1.6;margin:18px 0 24px;font-style:italic">
-      Consistency beats perfection. Start small, stay consistent, and you'll see results. &#x1F4AA;
+    <p style="font-size:0.84rem;color:var(--text-dim);line-height:1.6;margin:18px 0 24px;font-style:italic;user-select:none;-webkit-user-select:none">
+      Consistency beats perfection. Start small, stay consistent, and you&#x2019;ll see results. &#x1F4AA;
     </p>
 
     <!-- CTAs -->
@@ -1049,11 +1051,27 @@ function _maybeShowWelcome() {
   document.getElementById('wc-title').textContent =
     'Welcome to your fitness journey, ' + name + '! 🚀';
   // Goal message
-  document.getElementById('wc-goal').textContent =
+  document.getElementById(‘wc-goal’).textContent =
     _GOAL_MSGS[currentUser.fitness_goal] ||
-    'Your personalised macro plan is ready. Let’s make every meal count.';
+    ‘Your personalised macro plan is ready. Let’s make every meal count.’;
+  // Macro targets chips
+  var g = store.goals || {};
+  var kcal = Math.round((g.protein || 0) * 4 + (g.carbs || 0) * 4 + (g.fat || 0) * 9);
+  var chips = [
+    { label: ‘&#x1F525; Calories’, val: kcal + ‘ kcal’,  color: ‘#a78bfa’ },
+    { label: ‘&#x1F357; Protein’,  val: (g.protein || 0) + ‘g’, color: ‘#60a5fa’ },
+    { label: ‘&#x1F35E; Carbs’,    val: (g.carbs   || 0) + ‘g’, color: ‘#34d399’ },
+    { label: ‘&#x1F9C8; Fat’,      val: (g.fat     || 0) + ‘g’, color: ‘#fb923c’ },
+  ];
+  var macroEl = document.getElementById(‘wc-macros’);
+  macroEl.innerHTML = chips.map(function(c) {
+    return ‘<div style="flex:1;min-width:60px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:7px 10px;text-align:center">’
+      + ‘<div style="font-size:0.62rem;color:var(--text-dim);margin-bottom:3px">’ + c.label + ‘</div>’
+      + ‘<div style="font-size:0.85rem;font-weight:700;color:’ + c.color + ‘">’ + c.val + ‘</div>’
+      + ‘</div>’;
+  }).join(‘’);
   // Show overlay
-  document.getElementById('welcome-overlay').style.display = 'flex';
+  document.getElementById(‘welcome-overlay’).style.display = ‘flex’;
 }
 
 function _dismissWelcome() {
