@@ -269,11 +269,12 @@ class PasswordChange(BaseModel):
 # ── Suggest / Lookup Schemas ───────────────────────────────────────────────
 
 class SuggestRequest(BaseModel):
-    ingredients: str
+    ingredients:       str = ''
     remaining_protein: float = 0
     remaining_carbs:   float = 0
     remaining_fat:     float = 0
     remaining_kcal:    float = 0
+    past_meals:        list[str] = []
 
 
 class Dish(BaseModel):
@@ -300,14 +301,14 @@ class LookupResponse(BaseModel):
 
 # ── AI helpers ─────────────────────────────────────────────────────────────
 
-def _call_ai(prompt: str) -> str:
+def _call_ai(prompt: str, max_tokens: int = 512) -> str:
     client = resources.get('groq')
     if client is None:
         raise RuntimeError('GROQ_API_KEY is not set. Add it in the Render dashboard under Environment Variables.')
     resp = client.chat.completions.create(
         model='llama-3.1-8b-instant',
         messages=[{'role': 'user', 'content': prompt}],
-        max_tokens=512,
+        max_tokens=max_tokens,
     )
     return resp.choices[0].message.content.strip()
 
@@ -597,14 +598,89 @@ def health():
     }
 
 
+def _suggest_with_ai_new(req: SuggestRequest) -> list[dict]:
+    """Ask Groq to generate 5 meal suggestions from scratch using macro budget,
+    optional ingredients, and past-meal history for taste alignment."""
+    rem = (f"Remaining calories: {req.remaining_kcal:.0f} kcal | "
+           f"Protein: {req.remaining_protein:.1f}g | "
+           f"Carbs: {req.remaining_carbs:.1f}g | "
+           f"Fat: {req.remaining_fat:.1f}g")
+
+    parts = [
+        "You are a smart nutrition assistant for an Indian food tracking app.",
+        f"User's remaining nutrition budget for today: {rem}",
+    ]
+
+    if req.ingredients.strip():
+        parts.append(f'Ingredients the user has available: "{req.ingredients.strip()}"')
+        parts.append(
+            "Use these as the primary base for your suggestions. "
+            "You may add 1–2 complementary ingredients to better meet the macro goals."
+        )
+    else:
+        parts.append(
+            "No specific ingredients were provided. "
+            "Suggest any suitable dishes that fit the nutrition budget."
+        )
+
+    if req.past_meals:
+        meal_list = ', '.join(req.past_meals[:20])
+        parts.append(
+            f"User's recent meals over the past 3 days: {meal_list}. "
+            "Use these to understand their food preferences and suggest dishes they would likely enjoy."
+        )
+
+    parts.append(
+        "\nSuggest the TOP 5 dishes that best fit within this nutrition budget."
+        "\nEstimate realistic macronutrients for a typical single serving."
+        "\nReply ONLY with a valid JSON array of exactly 5 objects — no markdown, no extra text:"
+        '\n[{"rank":1,"name":"Dish Name","unit":"serving unit","protein":25.5,"carbs":45.0,"fat":8.0,"kcal":355,"match_pct":85,"reason":"One sentence why this fits"}]'
+    )
+
+    prompt = '\n'.join(parts)
+    text = _call_ai(prompt, max_tokens=1024)
+    m = re.search(r'\[.*?\]', text, re.DOTALL)
+    if not m:
+        raise ValueError(f'No JSON array in AI response: {text[:200]}')
+    items = json.loads(m.group())
+    result = []
+    for item in items[:5]:
+        p = float(item.get('protein', 0))
+        c = float(item.get('carbs', 0))
+        f = float(item.get('fat', 0))
+        k = item.get('kcal') or round(p * 4 + c * 4 + f * 9)
+        result.append({
+            'rank':      int(item.get('rank', len(result) + 1)),
+            'food':      str(item.get('name', '')),
+            'unit':      str(item.get('unit', 'serving')),
+            'protein':   round(p, 1),
+            'carbs':     round(c, 1),
+            'fat':       round(f, 1),
+            'kcal':      int(k),
+            'match_pct': min(100, max(0, int(item.get('match_pct', 0)))),
+            'reason':    str(item.get('reason', '')),
+        })
+    return result
+
+
 @app.post('/api/suggest', response_model=SuggestResponse)
 def suggest(req: SuggestRequest):
+    # Primary path: ask Groq to generate dishes directly
+    try:
+        dishes = _suggest_with_ai_new(req)
+        if not dishes:
+            raise ValueError('Empty dish list returned')
+        return SuggestResponse(dishes=dishes, candidates_found=len(dishes))
+    except Exception as primary_err:
+        pass  # fall through to BM25 fallback
+
+    # Fallback: BM25 + AI ranking from food DB (requires ingredients)
     if not req.ingredients.strip():
-        raise HTTPException(400, 'ingredients must not be empty')
+        raise HTTPException(503, 'AI suggestion unavailable and no ingredients provided for fallback.')
     raw        = _bm25_search(req.ingredients, k=30)
     candidates = _filter_by_macros(raw, req, target=15)
     if not candidates:
-        raise HTTPException(404, 'No matching foods found')
+        raise HTTPException(404, 'No matching foods found for given ingredients.')
     try:
         dishes = _rank_with_ai(candidates, req)
     except Exception:

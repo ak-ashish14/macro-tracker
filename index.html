@@ -557,7 +557,7 @@
 <main>
   <div class="calorie-strip" style="margin-top:20px">
     <div class="gauge-wrap">
-      <svg viewBox="0 0 200 140" id="gauge-svg" preserveAspectRatio="xMidYMid meet"></svg>
+      <svg viewBox="0 0 200 160" id="gauge-svg" preserveAspectRatio="xMidYMid meet"></svg>
     </div>
     <div class="gauge-labels">
       <div class="gauge-row">
@@ -627,7 +627,7 @@
       <div class="suggest-btn-icon">&#x1F4A1;</div>
       <div>
         <div class="suggest-btn-label">What can I eat?</div>
-        <div class="suggest-btn-sub" id="suggest-sub">Top 5 foods that fit your remaining budget</div>
+        <div class="suggest-btn-sub" id="suggest-sub">AI meal ideas based on your macros &amp; taste</div>
       </div>
     </div>
     <div class="suggest-chevron">&#8250;</div>
@@ -726,16 +726,16 @@
     <div id="suggest-remaining-strip" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;font-size:0.78rem;color:var(--text-dim);background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 14px;align-items:center"></div>
 
     <div class="form-group">
-      <label>Ingredients you have</label>
+      <label>Ingredients you have <span style="font-weight:400;color:var(--text-dim)">(optional)</span></label>
       <div style="display:flex;gap:8px">
         <input type="text" id="ingredient-input"
-          placeholder="e.g. rice, chicken, onion, dal&#8230;"
+          placeholder="e.g. chicken, rice, paneer&#8230; or leave blank"
           style="flex:1"
           autocomplete="off" />
-        <button class="btn btn-primary" id="btn-find-dishes" style="white-space:nowrap;flex-shrink:0">Find Dishes</button>
+        <button class="btn btn-primary" id="btn-find-dishes" style="white-space:nowrap;flex-shrink:0">Suggest</button>
       </div>
       <div style="font-size:0.73rem;color:var(--text-dim);margin-top:6px">
-        Separate with commas &middot; English or Indian names both work
+        Leave blank for general suggestions &middot; English or Indian names both work
       </div>
     </div>
 
@@ -1342,125 +1342,80 @@ function renderMacro(id, consumed, goal, kcalPer) {
 }
 
 function renderGauge(consumed, goal) {
-  /*
-   * ViewBox: 0 0 200 140
-   * Gauge is a speedometer arc: 8-o'clock → over the top → 4-o'clock
-   * In SVG angles (0=right, 90=down, 180=left, 270=up):
-   *   8-o'clock = 150°,  4-o'clock = 30°
-   *   Clockwise sweep from 150° → 180° → 270° → 0° → 30° = 240°
-   * Centre: (100, 105)  Radius: 76
-   * Start (150°): x=100+76*cos(150°)=100-65.8=34.2, y=105+76*sin(150°)=105+38=143  ✓ ≤140? barely
-   * Let's use cy=100, R=72:
-   *   Start/end y = 100+72*sin(150°)=100+36=136 ✓
-   *   Top y       = 100-72 = 28                 ✓
-   */
   var svg = document.getElementById('gauge-svg');
-  var cx = 100, cy = 100, R = 72;
-  // SVG angles (degrees, 0=right, clockwise positive)
-  var startA = 150, endA = 30; // 8-o'clock to 4-o'clock, 240° clockwise
+  var cx = 100, cy = 95, R = 66;
+  var startA = 150, endA = 30, totalSweep = 240;
 
   function pt(angleDeg, r) {
     var rad = angleDeg * Math.PI / 180;
     return { x: +(cx + r * Math.cos(rad)).toFixed(2),
              y: +(cy + r * Math.sin(rad)).toFixed(2) };
   }
-
-  // SVG arc path clockwise from a to b (both in SVG degrees)
   function arc(r, a, b) {
     var p1 = pt(a, r), p2 = pt(b, r);
-    // clockwise angular distance from a to b
-    var span = ((b - a) + 360) % 360;
-    var large = span > 180 ? 1 : 0;
+    var large = (((b - a) + 360) % 360) > 180 ? 1 : 0;
     return ['M', p1.x, p1.y, 'A', r, r, 0, large, 1, p2.x, p2.y].join(' ');
   }
 
-  // Total sweep = 240° clockwise from startA
-  var totalSweep = 240;
-  // Gauge max = 125% of goal; map ratio → angle
-  var ratio     = goal > 0 ? consumed / goal : 0;
-  var capped    = Math.min(ratio, 1.25);
-  var over      = ratio > 1;
-  // Needle angle (clockwise from startA)
-  var needleOff = capped * (totalSweep / 1.25); // 0→0°, 1.0→192°, 1.25→240°
-  var needleA   = startA + needleOff;
+  var ratio    = goal > 0 ? consumed / goal : 0;
+  var capped   = Math.min(ratio, 1.25);
+  var over     = ratio > 1;
+  var fillA    = startA + capped * (totalSweep / 1.25);
 
-  // Zone boundaries (ratio → SVG angle)
-  function ratioToA(r) { return startA + Math.min(r, 1.25) * (totalSweep / 1.25); }
-
-  var zones = [
-    { from: 0,    to: 0.5,  color: '#6c63ff' },
-    { from: 0.5,  to: 0.75, color: '#38bdf8' },
-    { from: 0.75, to: 1.0,  color: '#22c55e' },
-    { from: 1.0,  to: 1.25, color: '#ef4444' },
-  ];
-
-  var fillColor = over ? '#ef4444'
-                : ratio > 0.75 ? '#22c55e'
-                : ratio > 0.5  ? '#38bdf8' : '#6c63ff';
+  var fillColor = over      ? '#ef4444'
+                : ratio > 0.75 ? '#4ade80'
+                : ratio > 0.5  ? '#38bdf8'
+                :                '#818cf8';
 
   var h = '';
 
-  // 1. Track background
-  h += '<path d="' + arc(R, startA, endA) + '" fill="none" stroke="#252535" stroke-width="13" stroke-linecap="round"/>';
+  // Glow filter
+  h += '<defs>' +
+       '<filter id="glow" x="-30%" y="-30%" width="160%" height="160%">' +
+       '<feGaussianBlur stdDeviation="2.5" result="b"/>' +
+       '<feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>' +
+       '</filter>' +
+       '</defs>';
 
-  // 2. Dimmed zone bands
-  zones.forEach(function(z) {
-    h += '<path d="' + arc(R, ratioToA(z.from), ratioToA(z.to)) +
-         '" fill="none" stroke="' + z.color + '" stroke-width="13" stroke-linecap="butt" opacity="0.2"/>';
-  });
-
-  // 3. Live fill arc
-  if (ratio > 0.005) {
-    h += '<path d="' + arc(R, startA, needleA) +
-         '" fill="none" stroke="' + fillColor + '" stroke-width="13" stroke-linecap="round"' +
-         ' style="filter:drop-shadow(0 0 4px ' + fillColor + '99)"/>';
+  // Outer tick ring (72 ticks, every 10th is major)
+  var numTicks = 72;
+  for (var i = 0; i <= numTicks; i++) {
+    var tA      = startA + (i / numTicks) * totalSweep;
+    var major   = (i % 9 === 0);
+    var tOuter  = pt(tA, R + 11);
+    var tInner  = pt(tA, R + 11 - (major ? 7 : 4));
+    var lit     = ratio > 0.005 && (i / numTicks) <= (capped / 1.25);
+    h += '<line x1="' + tInner.x + '" y1="' + tInner.y +
+         '" x2="' + tOuter.x + '" y2="' + tOuter.y +
+         '" stroke="' + (lit ? fillColor : '#252535') + '"' +
+         ' stroke-width="' + (major ? 1.5 : 0.7) + '" stroke-linecap="round"/>';
   }
 
-  // 4. Tick marks at zone edges
-  [0, 0.5, 0.75, 1.0, 1.25].forEach(function(r) {
-    var a = ratioToA(r), inner = pt(a, R - 8), outer = pt(a, R + 6);
-    h += '<line x1="' + inner.x + '" y1="' + inner.y +
-         '" x2="' + outer.x + '" y2="' + outer.y +
-         '" stroke="#555" stroke-width="1.5" stroke-linecap="round"/>';
-  });
+  // Background track
+  h += '<path d="' + arc(R, startA, endA) +
+       '" fill="none" stroke="#1c1c2e" stroke-width="9" stroke-linecap="round"/>';
 
-  // 5. Zone labels (inside track, at R-22)
-  var labelR = R - 22;
-  [
-    { r: 0.2,   t: 'LOW'  },
-    { r: 0.625, t: 'GOOD' },
-    { r: 0.875, t: 'GREAT'},
-    { r: 1.125, t: 'OVER' },
-  ].forEach(function(z) {
-    var p = pt(ratioToA(z.r), labelR);
-    h += '<text x="' + p.x + '" y="' + p.y +
-         '" text-anchor="middle" dominant-baseline="middle"' +
-         ' font-size="7" font-weight="700" fill="#555" letter-spacing="0.3">' + z.t + '</text>';
-  });
+  // Fill arc with glow
+  if (ratio > 0.005) {
+    h += '<path d="' + arc(R, startA, fillA) +
+         '" fill="none" stroke="' + fillColor + '" stroke-width="9" stroke-linecap="round"' +
+         ' filter="url(#glow)"/>';
+  }
 
-  // 6. Needle (line from centre to near arc)
-  var nTip  = pt(needleA, R - 4);
-  var nBase = pt(needleA + 180, 10); // opposite side for base width
-  var nL    = pt(needleA - 90, 4), nR = pt(needleA + 90, 4);
-  var nColor = over ? '#ef4444' : '#e2e8f0';
-  h += '<polygon points="' + nTip.x + ',' + nTip.y + ' ' +
-       nL.x + ',' + nL.y + ' ' + cx + ',' + cy + ' ' +
-       nR.x + ',' + nR.y + '" fill="' + nColor + '" opacity="0.95"/>';
-  h += '<circle cx="' + cx + '" cy="' + cy + '" r="6" fill="#12121f" stroke="' + nColor + '" stroke-width="2"/>';
-
-  // 7. Centre text — all inside SVG so it scales with viewBox
-  var valColor  = over ? '#ef4444' : '#f1f5f9';
-  var zoneLabel = over ? 'OVER TARGET'
+  // Centre text
+  var valColor  = over ? '#ef4444' : '#f8fafc';
+  var zoneLabel = over         ? 'OVER TARGET'
                 : ratio > 0.75 ? 'ON TRACK'
-                : ratio > 0.4  ? 'GOOD'
-                : ratio > 0    ? 'LOW' : '';
-  h += '<text x="' + cx + '" y="' + (cy + 16) +
-       '" text-anchor="middle" font-size="22" font-weight="800" fill="' + valColor + '">' + consumed + '</text>';
-  h += '<text x="' + cx + '" y="' + (cy + 30) +
-       '" text-anchor="middle" font-size="7.5" font-weight="600" fill="#888">KCAL CONSUMED</text>';
+                : ratio > 0.4  ? 'BUILDING'
+                : ratio > 0    ? 'GET STARTED' : '';
+
+  h += '<text x="' + cx + '" y="' + (cy + 12) +
+       '" text-anchor="middle" font-size="28" font-weight="700" fill="' + valColor + '" letter-spacing="-0.5">' + consumed + '</text>';
+  h += '<text x="' + cx + '" y="' + (cy + 27) +
+       '" text-anchor="middle" font-size="8" font-weight="500" fill="#64748b">of ' + (goal > 0 ? goal : '—') + ' kcal</text>';
   if (zoneLabel) {
     h += '<text x="' + cx + '" y="' + (cy + 42) +
-         '" text-anchor="middle" font-size="7" font-weight="700" fill="' + valColor + '" opacity="0.8">' + zoneLabel + '</text>';
+         '" text-anchor="middle" font-size="7.5" font-weight="700" fill="' + (over ? '#ef4444' : fillColor) + '">' + zoneLabel + '</text>';
   }
 
   svg.innerHTML = h;
@@ -2022,22 +1977,31 @@ function openSuggest() {
   var remF = Math.max(0, g.fat - tf);
   var remCal = remP * 4 + remC * 4 + remF * 9;
 
+  // Count how many past days have meal history (for context badge)
+  var historyDays = 0;
+  var todayD = new Date();
+  for (var d = 1; d <= 3; d++) {
+    var pd = new Date(todayD); pd.setDate(todayD.getDate() - d);
+    if ((store.meals[makeKey(pd)] || []).length) historyDays++;
+  }
+
   var strip = document.getElementById('suggest-remaining-strip');
   strip.innerHTML =
-    '<span style="margin-right:2px">Remaining budget &mdash;</span>' +
+    '<span style="margin-right:2px">Remaining &mdash;</span>' +
     '<span style="color:var(--protein-color);font-weight:700">P ' + fmtG(remP) + 'g</span>' +
     '<span style="color:var(--text-dim)">&middot;</span>' +
     '<span style="color:var(--carbs-color);font-weight:700">C ' + fmtG(remC) + 'g</span>' +
     '<span style="color:var(--text-dim)">&middot;</span>' +
     '<span style="color:var(--fat-color);font-weight:700">F ' + fmtG(remF) + 'g</span>' +
     '<span style="color:var(--text-dim)">&middot;</span>' +
-    '<span style="color:var(--accent2);font-weight:700">' + Math.round(remCal) + ' kcal</span>';
+    '<span style="color:var(--accent2);font-weight:700">' + Math.round(remCal) + ' kcal</span>' +
+    (historyDays ? '<span style="margin-left:6px;font-size:0.7rem;background:rgba(108,99,255,.15);border:1px solid rgba(108,99,255,.3);border-radius:999px;padding:2px 8px;color:var(--accent2)">&#x1F4CA; ' + historyDays + '-day history</span>' : '');
 
   // Reset UI
   document.getElementById('ingredient-input').value = '';
   document.getElementById('ingredient-tags').innerHTML = '';
   document.getElementById('suggest-list').innerHTML =
-    '<div class="suggest-empty" style="padding:20px 0">Type ingredients above and tap <strong>Find Dishes</strong></div>';
+    '<div class="suggest-empty" style="padding:20px 0">Tap <strong>Suggest</strong> for AI-powered meal ideas,<br>or add ingredients to narrow results.</div>';
 
   openModal('modal-suggest');
   setTimeout(function() { document.getElementById('ingredient-input').focus(); }, 250);
@@ -2072,23 +2036,26 @@ function renderDishes(dishes, ingredients) {
   for (var j = 0; j < dishes.length; j++) {
     var s = dishes[j];
     var matchPct = s.match_pct || 0;
-    var displayName = ingredients
-      ? highlightIngredients(s.food || s.name, ingredients)
-      : esc(s.food || s.name);
+    var foodName = s.food || s.name;
+    var displayName = (ingredients && ingredients.length)
+      ? highlightIngredients(foodName, ingredients)
+      : esc(foodName);
+    var servingLabel = s.unit ? '1 ' + esc(s.unit) : '1 serving';
+    var matchColor = matchPct >= 80 ? 'var(--green)' : matchPct >= 50 ? 'var(--accent2)' : 'var(--text-dim)';
     html += '<div class="suggest-card">' +
       '<div class="suggest-rank">' + (j + 1) + '</div>' +
       '<div class="suggest-body">' +
         '<div class="suggest-name">' + displayName + '</div>' +
-        '<div class="suggest-qty">1 ' + esc(s.unit) + ' &middot; ' +
-          '<span style="color:var(--accent2)">' + matchPct + '% match</span>' +
+        '<div class="suggest-qty">' + servingLabel + ' &middot; ' +
+          '<span style="color:' + matchColor + ';font-weight:700">' + matchPct + '% fit</span>' +
         '</div>' +
-        (s.reason ? '<div style="font-size:0.72rem;color:var(--text-dim);margin-top:4px;line-height:1.4">' + esc(s.reason) + '</div>' : '') +
+        (s.reason ? '<div style="font-size:0.72rem;color:var(--text-dim);margin-top:5px;line-height:1.45;font-style:italic">\u201c' + esc(s.reason) + '\u201d</div>' : '') +
         '<div class="suggest-tags" style="margin-top:6px">' +
           '<div class="suggest-tag tp">P <span>' + fmtG(s.protein) + 'g</span></div>' +
           '<div class="suggest-tag tc">C <span>' + fmtG(s.carbs) + 'g</span></div>' +
           '<div class="suggest-tag tf">F <span>' + fmtG(s.fat) + 'g</span></div>' +
         '</div>' +
-        '<div class="suggest-match-bar" style="margin-top:7px"><div class="suggest-match-fill" style="width:' + matchPct + '%"></div></div>' +
+        '<div class="suggest-match-bar" style="margin-top:7px"><div class="suggest-match-fill" style="width:' + matchPct + '%;background:' + matchColor + '"></div></div>' +
       '</div>' +
       '<div class="suggest-right">' +
         '<div class="suggest-kcal">' + Math.round(s.kcal) + ' <span>kcal</span></div>' +
@@ -2105,7 +2072,7 @@ function renderDishes(dishes, ingredients) {
       var time = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
       if (!store.meals[currentDate]) store.meals[currentDate] = [];
       store.meals[currentDate].push({
-        food: s.food || s.name, qty: '1 ' + s.unit, type: 'SN',
+        food: s.food || s.name, qty: s.unit ? '1 ' + s.unit : '1 serving', type: 'SN',
         protein: parseFloat((s.protein||0).toFixed(2)),
         carbs:   parseFloat((s.carbs||0).toFixed(2)),
         fat:     parseFloat((s.fat||0).toFixed(2)),
@@ -2125,20 +2092,24 @@ function renderDishes(dishes, ingredients) {
 function findDishes() {
   var raw = document.getElementById('ingredient-input').value.trim();
   var listEl = document.getElementById('suggest-list');
-
-  if (!raw) {
-    listEl.innerHTML = '<div class="suggest-empty">Enter at least one ingredient to search.</div>';
-    return;
-  }
-
   var rem = getRemainingMacros();
   var ingredients = parseIngredients(raw);
+
+  // Collect food names from the past 3 days for taste-pattern context
+  var pastMeals = [];
+  var todayD = new Date();
+  for (var d = 1; d <= 3; d++) {
+    var pastDate = new Date(todayD);
+    pastDate.setDate(todayD.getDate() - d);
+    var dayMeals = store.meals[makeKey(pastDate)] || [];
+    dayMeals.forEach(function(m) { pastMeals.push(m.food); });
+  }
 
   // ── Show loading state ───────────────────────────────────────────────
   listEl.innerHTML =
     '<div style="display:flex;flex-direction:column;align-items:center;gap:12px;padding:28px 0">' +
       '<div style="width:32px;height:32px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 0.8s linear infinite"></div>' +
-      '<div style="font-size:0.82rem;color:var(--text-dim)">Searching dishes with AI&hellip;</div>' +
+      '<div style="font-size:0.82rem;color:var(--text-dim)">AI is crafting your meal suggestions&hellip;</div>' +
     '</div>';
 
   document.getElementById('btn-find-dishes').disabled = true;
@@ -2148,11 +2119,12 @@ function findDishes() {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      ingredients:        raw,
-      remaining_protein:  rem.protein,
-      remaining_carbs:    rem.carbs,
-      remaining_fat:      rem.fat,
-      remaining_kcal:     rem.kcal
+      ingredients:       raw,
+      remaining_protein: rem.protein,
+      remaining_carbs:   rem.carbs,
+      remaining_fat:     rem.fat,
+      remaining_kcal:    rem.kcal,
+      past_meals:        pastMeals
     })
   })
   .then(function(r) {
@@ -2165,10 +2137,12 @@ function findDishes() {
   })
   .catch(function(err) {
     document.getElementById('btn-find-dishes').disabled = false;
-    // Graceful fallback: run local JS scoring so the feature still works
-    // even if the backend is unreachable.
-    console.warn('API unreachable, falling back to local scoring:', err.message);
-    _localFallback(raw, ingredients, rem, listEl);
+    if (raw) {
+      console.warn('API unreachable, falling back to local scoring:', err.message);
+      _localFallback(raw, ingredients, rem, listEl);
+    } else {
+      listEl.innerHTML = '<div class="suggest-empty" style="color:var(--red)">&#x26A0; Could not reach AI. Check your connection and try again.</div>';
+    }
   });
 }
 
