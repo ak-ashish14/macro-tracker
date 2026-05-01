@@ -513,8 +513,7 @@ def complete_onboarding(req: OnboardingRequest, user: dict = Depends(_get_user_f
         raise HTTPException(400, f'diet_preference must be one of: {", ".join(sorted(DIET_PREFS))}')
     if req.fitness_goal not in FITNESS_GOALS:
         raise HTTPException(400, f'fitness_goal must be one of: {", ".join(sorted(FITNESS_GOALS))}')
-    if user.get('onboarding_completed'):
-        raise HTTPException(409, 'These preferences cannot be modified once set.')
+    # Preferences are updatable; only email is immutable (used as login identifier)
 
     conn = _db()
     try:
