@@ -534,9 +534,10 @@
 
 <!-- Onboarding overlay (blocking, shown after first login) -->
 <div id="onboarding-overlay" style="display:none;position:fixed;inset:0;background:rgba(10,10,20,.92);z-index:2000;display:none;align-items:center;justify-content:center;padding:16px">
-  <div class="auth-card" style="max-width:420px;width:100%">
+  <div class="auth-card" style="max-width:420px;width:100%;max-height:92vh;overflow-y:auto">
     <div class="auth-logo" style="margin-bottom:4px">Macro<span>Track</span></div>
-    <div style="font-size:1rem;font-weight:700;margin-bottom:6px;text-align:center">Personalise Your Experience</div>
+    <div style="font-size:1rem;font-weight:700;margin-bottom:16px;text-align:center">Personalise Your Experience</div>
+
     <!-- Dietary preference -->
     <div style="margin-bottom:18px">
       <div style="font-size:0.8rem;font-weight:700;color:var(--text-dim);letter-spacing:.05em;margin-bottom:10px">DIETARY PREFERENCE</div>
@@ -555,6 +556,23 @@
         <button class="ob-card" data-group="goal" data-val="FAT_LOSS">&#x1F525;<div class="ob-card-label">Cutting Fat</div></button>
         <button class="ob-card" data-group="goal" data-val="MAINTENANCE">&#x2696;&#xFE0F;<div class="ob-card-label">Maintenance</div></button>
       </div>
+    </div>
+
+    <!-- Personal info -->
+    <div style="font-size:0.8rem;font-weight:700;color:var(--text-dim);letter-spacing:.05em;margin-bottom:10px">PERSONAL INFO</div>
+    <input class="auth-input" type="text" id="ob-name" placeholder="Full name" autocomplete="name" />
+    <div class="auth-row" style="margin-top:10px">
+      <input class="auth-input" type="number" id="ob-age" placeholder="Age" min="1" max="120" />
+      <select class="auth-input" id="ob-gender">
+        <option value="">Gender</option>
+        <option value="male">Male</option>
+        <option value="female">Female</option>
+        <option value="other">Other</option>
+      </select>
+    </div>
+    <div class="auth-row" style="margin-top:10px;margin-bottom:18px">
+      <input class="auth-input" type="number" id="ob-weight" placeholder="Weight (kg)" step="0.1" />
+      <input class="auth-input" type="number" id="ob-height" placeholder="Height (cm)" step="0.1" />
     </div>
 
     <div class="auth-error" id="onboarding-error"></div>
@@ -815,16 +833,27 @@
   <div class="modal" style="max-height:90vh;overflow-y:auto">
     <div class="modal-title">My Profile</div>
 
-    <!-- Locked preferences (read-only) -->
-    <div id="prof-locked-section" style="margin-bottom:16px;display:none">
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <div style="flex:1;min-width:120px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:10px 14px">
-          <div style="font-size:0.68rem;font-weight:700;color:var(--text-dim);letter-spacing:.05em;margin-bottom:4px">DIET</div>
-          <div style="font-weight:700;font-size:0.88rem" id="prof-diet-val">—</div>
+    <!-- Preferences (editable) -->
+    <div id="prof-prefs-section" style="margin-bottom:16px;display:none">
+      <div class="profile-section-title" style="margin-top:0">Preferences</div>
+      <div class="profile-grid">
+        <div class="form-group">
+          <label style="font-size:0.72rem;font-weight:700;color:var(--text-dim);letter-spacing:.05em">DIET</label>
+          <select class="auth-input" id="prof-diet">
+            <option value="">Select diet</option>
+            <option value="VEG">🥦 Vegetarian</option>
+            <option value="NON_VEG">🍗 Non-Vegetarian</option>
+            <option value="EGGETARIAN">🥚 Eggetarian</option>
+          </select>
         </div>
-        <div style="flex:1;min-width:120px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:10px 14px">
-          <div style="font-size:0.68rem;font-weight:700;color:var(--text-dim);letter-spacing:.05em;margin-bottom:4px">GOAL</div>
-          <div style="font-weight:700;font-size:0.88rem" id="prof-goal-val">—</div>
+        <div class="form-group">
+          <label style="font-size:0.72rem;font-weight:700;color:var(--text-dim);letter-spacing:.05em">FITNESS GOAL</label>
+          <select class="auth-input" id="prof-goal">
+            <option value="">Select goal</option>
+            <option value="LEAN_GAIN">💪 Lean Muscle</option>
+            <option value="FAT_LOSS">🔥 Cutting Fat</option>
+            <option value="MAINTENANCE">⚖ Maintenance</option>
+          </select>
         </div>
       </div>
     </div>
@@ -1041,9 +1070,18 @@ document.getElementById('btn-onboarding-submit').onclick = function() {
   var btn = this;
   btn.disabled = true; btn.textContent = 'Saving…';
   document.getElementById('onboarding-error').textContent = '';
+  var obPayload = {
+    diet_preference: _obDiet,
+    fitness_goal:    _obGoal,
+    name:      document.getElementById('ob-name').value.trim() || null,
+    age:       parseInt(document.getElementById('ob-age').value) || null,
+    gender:    document.getElementById('ob-gender').value || null,
+    weight_kg: parseFloat(document.getElementById('ob-weight').value) || null,
+    height_cm: parseFloat(document.getElementById('ob-height').value) || null,
+  };
   fetch(API_BASE + '/auth/onboarding', {
     method: 'POST', headers: authHeaders(),
-    body: JSON.stringify({ diet_preference: _obDiet, fitness_goal: _obGoal }),
+    body: JSON.stringify(obPayload),
   })
   .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, d: d }; }); })
   .then(function(res) {
@@ -1078,13 +1116,11 @@ document.getElementById('btn-profile').onclick = function() {
   document.getElementById('prof-pw-new').value     = '';
   document.getElementById('prof-pw-confirm').value = '';
   setAuthError('prof-error', '');
-  // Show locked preferences if onboarding is complete
-  var DIET_LABELS = { VEG: '🥦 Veg', NON_VEG: '🍗 Non-Veg', EGGETARIAN: '🥚 Eggetarian' };
-  var GOAL_LABELS = { LEAN_GAIN: '💪 Lean Muscle', FAT_LOSS: '🔥 Cutting Fat', MAINTENANCE: '⚖ Maintenance' };
+  // Show preference dropdowns if onboarding is complete
   if (currentUser.onboarding_completed) {
-    document.getElementById('prof-locked-section').style.display = '';
-    document.getElementById('prof-diet-val').textContent = DIET_LABELS[currentUser.diet_preference] || currentUser.diet_preference || '—';
-    document.getElementById('prof-goal-val').textContent = GOAL_LABELS[currentUser.fitness_goal]    || currentUser.fitness_goal    || '—';
+    document.getElementById('prof-prefs-section').style.display = '';
+    document.getElementById('prof-diet').value = currentUser.diet_preference || '';
+    document.getElementById('prof-goal').value = currentUser.fitness_goal    || '';
   }
   openModal('modal-profile');
 };
@@ -1112,6 +1148,8 @@ document.getElementById('btn-profile-save').onclick = function() {
     goals_protein: parseFloat(document.getElementById('prof-g-protein').value) || null,
     goals_carbs:   parseFloat(document.getElementById('prof-g-carbs').value)   || null,
     goals_fat:     parseFloat(document.getElementById('prof-g-fat').value)     || null,
+    diet_preference: document.getElementById('prof-diet') ? (document.getElementById('prof-diet').value || null) : null,
+    fitness_goal:    document.getElementById('prof-goal') ? (document.getElementById('prof-goal').value || null) : null,
   };
 
   var chain = fetch(API_BASE + '/auth/profile', {
@@ -1137,6 +1175,8 @@ document.getElementById('btn-profile-save').onclick = function() {
         name: res.d.name, age: res.d.age, gender: res.d.gender,
         weight_kg: res.d.weight_kg, height_cm: res.d.height_cm,
         goals: res.d.goals,
+        diet_preference: res.d.diet_preference,
+        fitness_goal: res.d.fitness_goal,
       });
     }
     localStorage.setItem(USER_KEY, JSON.stringify(currentUser));

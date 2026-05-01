@@ -265,6 +265,11 @@ class LoginRequest(BaseModel):
 class OnboardingRequest(BaseModel):
     diet_preference: str
     fitness_goal:    str
+    name:      Optional[str]   = None
+    age:       Optional[int]   = None
+    gender:    Optional[str]   = None
+    weight_kg: Optional[float] = None
+    height_cm: Optional[float] = None
 
 
 class ProfileUpdate(BaseModel):
@@ -273,9 +278,11 @@ class ProfileUpdate(BaseModel):
     gender:    Optional[str]   = None
     weight_kg: Optional[float] = None
     height_cm: Optional[float] = None
-    goals_protein: Optional[float] = None
-    goals_carbs:   Optional[float] = None
-    goals_fat:     Optional[float] = None
+    goals_protein:   Optional[float] = None
+    goals_carbs:     Optional[float] = None
+    goals_fat:       Optional[float] = None
+    diet_preference: Optional[str]   = None
+    fitness_goal:    Optional[str]   = None
 
 
 class PasswordChange(BaseModel):
@@ -515,14 +522,33 @@ def complete_onboarding(req: OnboardingRequest, user: dict = Depends(_get_user_f
         raise HTTPException(400, f'fitness_goal must be one of: {", ".join(sorted(FITNESS_GOALS))}')
     # Preferences are updatable; only email is immutable (used as login identifier)
 
+    # Calculate suggested macro goals from body stats if provided
+    suggested = _calc_suggested_goals(req.weight_kg, req.height_cm, req.age, req.gender)
+
     conn = _db()
     try:
         with conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    """UPDATE users SET diet_preference = %s, fitness_goal = %s,
-                       onboarding_completed = TRUE WHERE username = %s""",
-                    (req.diet_preference, req.fitness_goal, user['username'])
+                    """UPDATE users SET
+                         diet_preference    = %s,
+                         fitness_goal       = %s,
+                         onboarding_completed = TRUE,
+                         name               = COALESCE(%s, name),
+                         age                = COALESCE(%s, age),
+                         gender             = COALESCE(%s, gender),
+                         weight_kg          = COALESCE(%s, weight_kg),
+                         height_cm          = COALESCE(%s, height_cm),
+                         goals_protein      = %s,
+                         goals_carbs        = %s,
+                         goals_fat          = %s
+                       WHERE username = %s""",
+                    (
+                        req.diet_preference, req.fitness_goal,
+                        req.name, req.age, req.gender, req.weight_kg, req.height_cm,
+                        suggested['protein'], suggested['carbs'], suggested['fat'],
+                        user['username'],
+                    )
                 )
                 cur.execute('SELECT * FROM users WHERE username = %s', (user['username'],))
                 updated = dict(cur.fetchone())
@@ -534,12 +560,19 @@ def complete_onboarding(req: OnboardingRequest, user: dict = Depends(_get_user_f
 
 @app.put('/auth/profile')
 def update_profile(req: ProfileUpdate, user: dict = Depends(_get_user_from_token)):
+    # Validate enum fields if provided
+    if req.diet_preference is not None and req.diet_preference not in DIET_PREFS:
+        raise HTTPException(400, f'diet_preference must be one of: {", ".join(sorted(DIET_PREFS))}')
+    if req.fitness_goal is not None and req.fitness_goal not in FITNESS_GOALS:
+        raise HTTPException(400, f'fitness_goal must be one of: {", ".join(sorted(FITNESS_GOALS))}')
+
     fields, values = [], []
     for col, val in [
         ('name', req.name), ('age', req.age), ('gender', req.gender),
         ('weight_kg', req.weight_kg), ('height_cm', req.height_cm),
         ('goals_protein', req.goals_protein), ('goals_carbs', req.goals_carbs),
         ('goals_fat', req.goals_fat),
+        ('diet_preference', req.diet_preference), ('fitness_goal', req.fitness_goal),
     ]:
         if val is not None:
             fields.append(f'{col} = %s')
