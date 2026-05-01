@@ -594,6 +594,39 @@
   </div>
 </div>
 
+<!-- Welcome Pop-up (shown once after first onboarding) -->
+<div id="welcome-overlay" style="display:none;position:fixed;inset:0;background:rgba(10,10,20,.88);z-index:1500;align-items:center;justify-content:center;padding:16px">
+  <div class="auth-card" style="max-width:440px;width:100%;text-align:center;padding:36px 28px 28px">
+
+    <!-- Rocket + Title -->
+    <div style="font-size:2.8rem;margin-bottom:10px">&#x1F680;</div>
+    <h2 id="wc-title" style="font-size:1.25rem;font-weight:800;line-height:1.35;margin-bottom:22px;color:var(--text)"></h2>
+
+    <!-- Goal Card -->
+    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:10px;text-align:left">
+      <div style="font-size:0.68rem;font-weight:700;color:var(--accent2);letter-spacing:.08em;margin-bottom:6px">&#x1F3AF; YOUR PLAN</div>
+      <p id="wc-goal" style="font-size:0.87rem;color:var(--text);line-height:1.55;margin:0"></p>
+    </div>
+
+    <!-- Feature Card -->
+    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:10px;text-align:left">
+      <div style="font-size:0.68rem;font-weight:700;color:var(--accent2);letter-spacing:.08em;margin-bottom:6px">&#x1F37D; WHAT CAN I EAT?</div>
+      <p style="font-size:0.87rem;color:var(--text);line-height:1.55;margin:0">Instantly discover meals tailored to your diet &amp; remaining macros — no guesswork, just smart choices.</p>
+    </div>
+
+    <!-- Motivation -->
+    <p style="font-size:0.84rem;color:var(--text-dim);line-height:1.6;margin:18px 0 24px;font-style:italic">
+      Consistency beats perfection. Start small, stay consistent, and you'll see results. &#x1F4AA;
+    </p>
+
+    <!-- CTAs -->
+    <button class="auth-btn" id="btn-wc-start">Let&#x2019;s Get Started</button>
+    <button id="btn-wc-meals" style="display:block;width:100%;margin-top:10px;background:none;border:1px solid var(--border);color:var(--text-dim);border-radius:10px;padding:11px;font-size:0.88rem;font-weight:600;cursor:pointer;transition:border-color .2s">
+      Explore Meals &rarr;
+    </button>
+  </div>
+</div>
+
 <div class="loading-bar" id="loading-bar"></div>
 
 <header>
@@ -997,7 +1030,45 @@ function _showMainApp() {
   document.getElementById('user-avatar').textContent = label.charAt(0).toUpperCase();
   document.getElementById('user-label').textContent  = label;
   render();
+  _maybeShowWelcome();
 }
+
+var WELCOME_KEY = 'mt_welcome_shown';
+
+var _GOAL_MSGS = {
+  LEAN_GAIN:   "We’ll help you build lean muscle with the right balance of protein, calories, and smart nutrition.",
+  FAT_LOSS:    "Your plan is designed to help you lose fat while maintaining strength and energy.",
+  MAINTENANCE: "We’ll help you stay fit, balanced, and consistent with smart nutrition choices."
+};
+
+function _maybeShowWelcome() {
+  if (localStorage.getItem(WELCOME_KEY)) return;
+  if (!currentUser || !currentUser.onboarding_completed) return;
+  // Personalise title
+  var name = currentUser.name || (currentUser.email || '').split('@')[0] || 'there';
+  document.getElementById('wc-title').textContent =
+    'Welcome to your fitness journey, ' + name + '! 🚀';
+  // Goal message
+  document.getElementById('wc-goal').textContent =
+    _GOAL_MSGS[currentUser.fitness_goal] ||
+    'Your personalised macro plan is ready. Let’s make every meal count.';
+  // Show overlay
+  document.getElementById('welcome-overlay').style.display = 'flex';
+}
+
+function _dismissWelcome() {
+  localStorage.setItem(WELCOME_KEY, '1');
+  document.getElementById('welcome-overlay').style.display = 'none';
+}
+
+document.getElementById('btn-wc-start').onclick = function() {
+  _dismissWelcome();
+};
+
+document.getElementById('btn-wc-meals').onclick = function() {
+  _dismissWelcome();
+  openSuggest();
+};
 
 // ── Login ──────────────────────────────────────────────────────────────────────────────────
 document.getElementById('btn-login').onclick = function() {
