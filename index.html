@@ -1321,16 +1321,22 @@ function _dismissWelcome() {
 document.getElementById('btn-wc-start').onclick = _dismissWelcome;
 
 // ── Login ──────────────────────────────────────────────────────────────────────────────────
-document.getElementById('btn-login').onclick = function() {
-  var btn = this;
-  btn.disabled = true; btn.textContent = 'Signing in…';
-  setAuthError('login-error', '');
+
+// Warm up the Render backend as soon as the page loads so cold-start latency
+// is served before the user finishes typing their credentials.
+(function _warmServer() {
+  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') return;
+  fetch('/health', { method: 'GET' }).catch(function() {});
+})();
+
+function _doLogin(btn, attempt) {
+  var payload = JSON.stringify({
+    email:    document.getElementById('login-email').value.trim(),
+    password: document.getElementById('login-password').value,
+  });
   fetch(API_BASE + '/auth/login', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      email:    document.getElementById('login-email').value.trim(),
-      password: document.getElementById('login-password').value,
-    }),
+    body: payload,
   })
   .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, d: d }; }); })
   .then(function(res) {
@@ -1339,9 +1345,23 @@ document.getElementById('btn-login').onclick = function() {
     onAuthSuccess(res.d);
   })
   .catch(function() {
-    btn.disabled = false; btn.textContent = 'Sign In';
-    setAuthError('login-error', 'Server unreachable');
+    // First failure is almost always a Render cold-start timeout — retry once automatically
+    if (attempt === 1) {
+      btn.textContent = 'Server warming up… retrying';
+      setAuthError('login-error', 'Server is starting up, retrying…');
+      setTimeout(function() { _doLogin(btn, 2); }, 4000);
+    } else {
+      btn.disabled = false; btn.textContent = 'Sign In';
+      setAuthError('login-error', 'Server took too long to respond. Please try again.');
+    }
   });
+}
+
+document.getElementById('btn-login').onclick = function() {
+  var btn = this;
+  btn.disabled = true; btn.textContent = 'Signing in…';
+  setAuthError('login-error', '');
+  _doLogin(btn, 1);
 };
 document.getElementById('login-password').addEventListener('keydown', function(e) {
   if (e.key === 'Enter') document.getElementById('btn-login').click();
