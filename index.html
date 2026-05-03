@@ -1415,7 +1415,7 @@ document.getElementById('btn-reg-submit').onclick = function() {
   if (!email.includes('@') || !email.includes('.')) { setAuthError('reg-error', 'Enter a valid email address'); return; }
   if (password.length < 6) { setAuthError('reg-error', 'Password must be at least 6 characters'); return; }
   btn.disabled = true; btn.textContent = 'Creating account…';
-  fetch(API_BASE + '/auth/register', {
+  fetch('/auth/register', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email: email, password: password }),
   })
@@ -1495,7 +1495,7 @@ document.getElementById('btn-onboarding-submit').onclick = function() {
     weight_kg: weight,
     height_cm: parseFloat(document.getElementById('ob-height').value) || null,
   };
-  fetch(API_BASE + '/auth/onboarding', {
+  fetch('/auth/onboarding', {
     method: 'POST', headers: authHeaders(),
     body: JSON.stringify(obPayload),
   })
@@ -1578,14 +1578,14 @@ document.getElementById('btn-profile-save').onclick = function() {
     activity:        document.getElementById('prof-activity') ? (document.getElementById('prof-activity').value || null) : null,
   };
 
-  var chain = fetch(API_BASE + '/auth/profile', {
+  var chain = fetch('/auth/profile', {
     method: 'PUT', headers: authHeaders(), body: JSON.stringify(profilePayload),
   }).then(function(r) { return r.json().then(function(d) { return { ok: r.ok, d: d }; }); });
 
   if (pwNew && pwCurrent) {
     chain = chain.then(function(profileRes) {
       if (!profileRes.ok) return profileRes;
-      return fetch(API_BASE + '/auth/password', {
+      return fetch('/auth/password', {
         method: 'PUT', headers: authHeaders(),
         body: JSON.stringify({ current_password: pwCurrent, new_password: pwNew }),
       }).then(function(r) { return r.json().then(function(d) { return { ok: r.ok, d: d }; }); });
@@ -1637,41 +1637,42 @@ document.getElementById('btn-logout').onclick = function() {
 (function() {
   var savedToken = localStorage.getItem(AUTH_KEY);
   var savedUser  = localStorage.getItem(USER_KEY);
-  if (savedToken && savedUser) {
-    AUTH_TOKEN  = savedToken;
-    currentUser = JSON.parse(savedUser);
-    // Validate token against server in background
-    fetch(API_BASE + '/auth/me', { headers: authHeaders() })
-      .then(function(r) { return r.ok ? r.json() : null; })
-      .then(function(user) {
-        if (user) {
-          currentUser = user;
-          localStorage.setItem(USER_KEY, JSON.stringify(user));
-          store.goals = user.goals;
-          saveStore();
-          syncMealsFromServer();
-          document.getElementById('auth-overlay').style.display = 'none';
-          document.getElementById('btn-profile').style.display  = '';
-          var initials = (user.name || user.username).charAt(0).toUpperCase();
-          document.getElementById('user-avatar').textContent = initials;
-          document.getElementById('user-label').textContent  = user.name || user.username;
-          render();
-        } else {
-          AUTH_TOKEN = null; currentUser = null;
-          localStorage.removeItem(AUTH_KEY); localStorage.removeItem(USER_KEY);
-        }
-      })
-      .catch(function() {
-        // Server down – allow offline with cached user
-        document.getElementById('auth-overlay').style.display = 'none';
-        document.getElementById('btn-profile').style.display  = '';
-        var initials = (currentUser.name || currentUser.username).charAt(0).toUpperCase();
-        document.getElementById('user-avatar').textContent = initials;
-        document.getElementById('user-label').textContent  = currentUser.name || currentUser.username;
-        render();
-      });
-  }
-  // else: overlay stays visible, user must log in
+  if (!savedToken || !savedUser) return; // no session → login screen stays visible
+
+  AUTH_TOKEN  = savedToken;
+  try { currentUser = JSON.parse(savedUser); } catch(e) { return; }
+
+  // Validate token with server, then boot the full app
+  fetch('/auth/me', { headers: authHeaders() })
+    .then(function(r) { return r.ok ? r.json() : null; })
+    .then(function(user) {
+      if (user) {
+        // Fresh user data from server — merge goals and reload store
+        currentUser = user;
+        localStorage.setItem(USER_KEY, JSON.stringify(user));
+        store = loadStore();
+        store.goals = user.goals || store.goals;
+        if (!store.meals) store.meals = {};
+        saveStore();
+      }
+      // Whether token was validated or just cached — boot the app
+      document.getElementById('auth-overlay').style.display = 'none';
+      if (currentUser && !currentUser.onboarding_completed) {
+        document.getElementById('onboarding-overlay').style.display = 'flex';
+      } else {
+        _showMainApp(); // shows bottom nav, loads workout IDs, syncs meals, renders
+      }
+    })
+    .catch(function() {
+      // Server unreachable — boot in offline mode with cached data
+      // _showMainApp() handles graceful degradation for each network call
+      document.getElementById('auth-overlay').style.display = 'none';
+      if (currentUser && !currentUser.onboarding_completed) {
+        document.getElementById('onboarding-overlay').style.display = 'flex';
+      } else {
+        _showMainApp();
+      }
+    });
 })();
 
 // ── App state ──────────────────────────────────────────────────────────────
@@ -1723,7 +1724,7 @@ function pushMealDate(date, attempt) {
   attempt = attempt || 1;
   setSyncDot('syncing');
   var entries = store.meals[date] || [];
-  fetch(API_BASE + '/api/meals/' + date, {
+  fetch('/api/meals/' + date, {
     method: 'PUT', headers: authHeaders(),
     body: JSON.stringify({ entries: entries })
   })
@@ -1749,13 +1750,26 @@ function saveStore(changedDate) {
 
 function syncMealsFromServer(callback) {
   if (!AUTH_TOKEN) { if (callback) callback(); return; }
-  fetch(API_BASE + '/api/meals', { headers: authHeaders() })
+  fetch('/api/meals', { headers: authHeaders() })
     .then(function(r) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
     })
     .then(function(serverMeals) {
-      store.meals = serverMeals;
+      // Server is authoritative: merge its dates into local store.
+      // If server has data, use it; if server returns {}, keep local meals
+      // so offline-logged meals are not wiped before they sync.
+      if (Object.keys(serverMeals).length > 0) {
+        // Merge: server dates override local, local-only dates are preserved
+        Object.keys(serverMeals).forEach(function(d) {
+          store.meals[d] = serverMeals[d];
+        });
+      } else {
+        // Server empty — push any local meals to server to sync them up
+        Object.keys(store.meals || {}).forEach(function(d) {
+          if (store.meals[d] && store.meals[d].length) pushMealDate(d);
+        });
+      }
       localStorage.setItem(storeKeyForUser(), JSON.stringify(store));
       render();
       if (callback) callback();
@@ -2104,7 +2118,7 @@ function askAI(btn) {
   if (!q) return;
   var container = btn.closest('.sr-empty');
   container.innerHTML = '<span class="ai-spinner"></span> Asking AI about <em>' + esc(q) + '</em>&hellip;';
-  fetch(API_BASE + '/api/lookup', {
+  fetch('/api/lookup', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ food_name: q }),
@@ -2392,7 +2406,7 @@ document.getElementById('btn-save-goals').onclick = function() {
   saveStore();
   // Sync to server if logged in
   if (AUTH_TOKEN) {
-    fetch(API_BASE + '/auth/profile', {
+    fetch('/auth/profile', {
       method: 'PUT', headers: authHeaders(),
       body: JSON.stringify({ goals_protein: g.protein, goals_carbs: g.carbs, goals_fat: g.fat }),
     });
@@ -2687,7 +2701,7 @@ function findDishes() {
   document.getElementById('btn-find-dishes').disabled = true;
 
   // ── Call backend API ─────────────────────────────────────────────────
-  fetch(API_BASE + '/api/suggest', {
+  fetch('/api/suggest', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -2904,7 +2918,7 @@ var _hydratedDates  = {};   // { 'YYYY-MM-DD': true } — prevents double-fetchi
 
 function _loadWorkoutIds() {
   if (!currentUser) return;
-  fetch(API_BASE + '/api/workouts', { headers: authHeaders() })
+  fetch('/api/workouts', { headers: authHeaders() })
     .then(function(r) { return r.json(); })
     .then(function(workouts) {
       // Map by workout name to align with WORKOUTS_DATA index order
@@ -2929,7 +2943,7 @@ function _hydrateExerciseFromServer(date) {
   _hydratedDates[date] = true;
   if (!currentUser) return;
 
-  fetch(API_BASE + '/api/workout/today?date=' + date, { headers: authHeaders() })
+  fetch('/api/workout/today?date=' + date, { headers: authHeaders() })
     .then(function(r) { return r.json(); })
     .then(function(res) {
       var data    = _getExStore();
@@ -3159,7 +3173,7 @@ function _saveExercise(exIdx) {
   status.textContent = 'Estimating calories…';
   status.className   = 'ex-save-status';
 
-  fetch(API_BASE + '/api/exercise/calories', {
+  fetch('/api/exercise/calories', {
     method: 'POST',
     headers: authHeaders(),
     body: JSON.stringify({
@@ -3199,7 +3213,7 @@ function _saveExercise(exIdx) {
           note:   sv.notes || '',
         };
       });
-      fetch(API_BASE + '/api/exercise/save', {
+      fetch('/api/exercise/save', {
         method: 'POST',
         headers: authHeaders(),
         body: JSON.stringify({
@@ -3308,7 +3322,7 @@ function submitActivity() {
   btn.disabled = true;
   btn.textContent = 'Estimating…';
 
-  fetch(API_BASE + '/api/activity/calories', {
+  fetch('/api/activity/calories', {
     method: 'POST',
     headers: authHeaders(),
     body: JSON.stringify({ activity: activity, duration: duration, intensity: intensity })
@@ -3332,7 +3346,7 @@ function submitActivity() {
     // ── Persist to backend ────────────────────────────────────────────────
     var wIdx2 = parseInt(document.getElementById('ex-workout-select').value);
     var wId2  = (!isNaN(wIdx2) && _workoutDbMap[wIdx2]) ? _workoutDbMap[wIdx2].id : null;
-    fetch(API_BASE + '/api/activity/log', {
+    fetch('/api/activity/log', {
       method: 'POST',
       headers: authHeaders(),
       body: JSON.stringify({
