@@ -1209,6 +1209,11 @@
 </div>
 
 <script>
+// Local dev → direct to FastAPI; production (Vercel) → relative (proxied by vercel.json)
+var API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+  ? 'http://localhost:8001'
+  : '';
+
 // ── Auth state ─────────────────────────────────────────────────────────────
 var AUTH_TOKEN = null;
 var currentUser = null;
@@ -1342,7 +1347,7 @@ function _pollServerHealth() {
   }
   _setServerStatus('⏳ Connecting to server…');
   (function ping() {
-    fetch('/health', { method: 'GET' })
+    fetch(API_BASE + '/health', { method: 'GET' })
       .then(function(r) { return r.ok ? r.json() : Promise.reject(); })
       .then(function() {
         _serverReady = true;
@@ -1363,7 +1368,7 @@ function _doLogin(btn, attempt) {
   var email    = document.getElementById('login-email').value.trim();
   var password = document.getElementById('login-password').value;
 
-  fetch('/auth/login', {
+  fetch(API_BASE + '/auth/login', {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
     body:    JSON.stringify({ email: email, password: password }),
@@ -1415,7 +1420,7 @@ document.getElementById('btn-reg-submit').onclick = function() {
   if (!email.includes('@') || !email.includes('.')) { setAuthError('reg-error', 'Enter a valid email address'); return; }
   if (password.length < 6) { setAuthError('reg-error', 'Password must be at least 6 characters'); return; }
   btn.disabled = true; btn.textContent = 'Creating account…';
-  fetch('/auth/register', {
+  fetch(API_BASE + '/auth/register', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email: email, password: password }),
   })
@@ -1495,7 +1500,7 @@ document.getElementById('btn-onboarding-submit').onclick = function() {
     weight_kg: weight,
     height_cm: parseFloat(document.getElementById('ob-height').value) || null,
   };
-  fetch('/auth/onboarding', {
+  fetch(API_BASE + '/auth/onboarding', {
     method: 'POST', headers: authHeaders(),
     body: JSON.stringify(obPayload),
   })
@@ -1578,14 +1583,14 @@ document.getElementById('btn-profile-save').onclick = function() {
     activity:        document.getElementById('prof-activity') ? (document.getElementById('prof-activity').value || null) : null,
   };
 
-  var chain = fetch('/auth/profile', {
+  var chain = fetch(API_BASE + '/auth/profile', {
     method: 'PUT', headers: authHeaders(), body: JSON.stringify(profilePayload),
   }).then(function(r) { return r.json().then(function(d) { return { ok: r.ok, d: d }; }); });
 
   if (pwNew && pwCurrent) {
     chain = chain.then(function(profileRes) {
       if (!profileRes.ok) return profileRes;
-      return fetch('/auth/password', {
+      return fetch(API_BASE + '/auth/password', {
         method: 'PUT', headers: authHeaders(),
         body: JSON.stringify({ current_password: pwCurrent, new_password: pwNew }),
       }).then(function(r) { return r.json().then(function(d) { return { ok: r.ok, d: d }; }); });
@@ -1643,7 +1648,7 @@ document.getElementById('btn-logout').onclick = function() {
   try { currentUser = JSON.parse(savedUser); } catch(e) { return; }
 
   // Validate token with server, then boot the full app
-  fetch('/auth/me', { headers: authHeaders() })
+  fetch(API_BASE + '/auth/me', { headers: authHeaders() })
     .then(function(r) { return r.ok ? r.json() : null; })
     .then(function(user) {
       if (user) {
@@ -1724,7 +1729,7 @@ function pushMealDate(date, attempt) {
   attempt = attempt || 1;
   setSyncDot('syncing');
   var entries = store.meals[date] || [];
-  fetch('/api/meals/' + date, {
+  fetch(API_BASE + '/api/meals/' + date, {
     method: 'PUT', headers: authHeaders(),
     body: JSON.stringify({ entries: entries })
   })
@@ -1750,7 +1755,7 @@ function saveStore(changedDate) {
 
 function syncMealsFromServer(callback) {
   if (!AUTH_TOKEN) { if (callback) callback(); return; }
-  fetch('/api/meals', { headers: authHeaders() })
+  fetch(API_BASE + '/api/meals', { headers: authHeaders() })
     .then(function(r) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
@@ -2118,7 +2123,7 @@ function askAI(btn) {
   if (!q) return;
   var container = btn.closest('.sr-empty');
   container.innerHTML = '<span class="ai-spinner"></span> Asking AI about <em>' + esc(q) + '</em>&hellip;';
-  fetch('/api/lookup', {
+  fetch(API_BASE + '/api/lookup', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ food_name: q }),
@@ -2409,7 +2414,7 @@ document.getElementById('btn-save-goals').onclick = function() {
   saveStore();
   // Sync to server if logged in
   if (AUTH_TOKEN) {
-    fetch('/auth/profile', {
+    fetch(API_BASE + '/auth/profile', {
       method: 'PUT', headers: authHeaders(),
       body: JSON.stringify({ goals_protein: g.protein, goals_carbs: g.carbs, goals_fat: g.fat }),
     });
@@ -2596,11 +2601,6 @@ function openSuggest() {
   setTimeout(function() { document.getElementById('ingredient-input').focus(); }, 250);
 }
 
-// Local dev → direct to FastAPI; production (Vercel) → relative (proxied by vercel.json)
-var API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-  ? 'http://localhost:8001'
-  : '';
-
 function getRemainingMacros() {
   var meals = store.meals[currentDate] || [];
   var g = store.goals;
@@ -2704,7 +2704,7 @@ function findDishes() {
   document.getElementById('btn-find-dishes').disabled = true;
 
   // ── Call backend API ─────────────────────────────────────────────────
-  fetch('/api/suggest', {
+  fetch(API_BASE + '/api/suggest', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -2921,7 +2921,7 @@ var _hydratedDates  = {};   // { 'YYYY-MM-DD': true } — prevents double-fetchi
 
 function _loadWorkoutIds() {
   if (!currentUser) return;
-  fetch('/api/workouts', { headers: authHeaders() })
+  fetch(API_BASE + '/api/workouts', { headers: authHeaders() })
     .then(function(r) { return r.json(); })
     .then(function(workouts) {
       // Map by workout name to align with WORKOUTS_DATA index order
@@ -2946,7 +2946,7 @@ function _hydrateExerciseFromServer(date) {
   _hydratedDates[date] = true;
   if (!currentUser) return;
 
-  fetch('/api/workout/today?date=' + date, { headers: authHeaders() })
+  fetch(API_BASE + '/api/workout/today?date=' + date, { headers: authHeaders() })
     .then(function(r) { return r.json(); })
     .then(function(res) {
       var data    = _getExStore();
@@ -3176,7 +3176,7 @@ function _saveExercise(exIdx) {
   status.textContent = 'Estimating calories…';
   status.className   = 'ex-save-status';
 
-  fetch('/api/exercise/calories', {
+  fetch(API_BASE + '/api/exercise/calories', {
     method: 'POST',
     headers: authHeaders(),
     body: JSON.stringify({
@@ -3216,7 +3216,7 @@ function _saveExercise(exIdx) {
           note:   sv.notes || '',
         };
       });
-      fetch('/api/exercise/save', {
+      fetch(API_BASE + '/api/exercise/save', {
         method: 'POST',
         headers: authHeaders(),
         body: JSON.stringify({
@@ -3325,7 +3325,7 @@ function submitActivity() {
   btn.disabled = true;
   btn.textContent = 'Estimating…';
 
-  fetch('/api/activity/calories', {
+  fetch(API_BASE + '/api/activity/calories', {
     method: 'POST',
     headers: authHeaders(),
     body: JSON.stringify({ activity: activity, duration: duration, intensity: intensity })
@@ -3349,7 +3349,7 @@ function submitActivity() {
     // ── Persist to backend ────────────────────────────────────────────────
     var wIdx2 = parseInt(document.getElementById('ex-workout-select').value);
     var wId2  = (!isNaN(wIdx2) && _workoutDbMap[wIdx2]) ? _workoutDbMap[wIdx2].id : null;
-    fetch('/api/activity/log', {
+    fetch(API_BASE + '/api/activity/log', {
       method: 'POST',
       headers: authHeaders(),
       body: JSON.stringify({
