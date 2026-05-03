@@ -1358,41 +1358,37 @@ function _pollServerHealth() {
 
 _pollServerHealth();
 
-// ── Login with explicit timeout + auto-retry ────────────────────────────────
-function _fetchWithTimeout(url, opts, ms) {
-  var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
-  var timer = ctrl ? setTimeout(function() { ctrl.abort(); }, ms) : null;
-  var req   = fetch(url, ctrl ? Object.assign({}, opts, { signal: ctrl.signal }) : opts);
-  return req.finally ? req.finally(function() { if (timer) clearTimeout(timer); }) : req;
-}
-
+// ── Login ───────────────────────────────────────────────────────────────────
 function _doLogin(btn, attempt) {
-  var payload = JSON.stringify({
-    email:    document.getElementById('login-email').value.trim(),
-    password: document.getElementById('login-password').value,
-  });
-  // 50-second timeout per attempt — covers Render cold-start fully
-  _fetchWithTimeout(
-    API_BASE + '/auth/login',
-    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload },
-    50000
-  )
-  .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, d: d }; }); })
+  var email    = document.getElementById('login-email').value.trim();
+  var password = document.getElementById('login-password').value;
+
+  fetch('/auth/login', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ email: email, password: password }),
+  })
+  .then(function(r) {
+    return r.json().then(function(d) { return { ok: r.ok, status: r.status, d: d }; });
+  })
   .then(function(res) {
     btn.disabled = false; btn.textContent = 'Sign In';
-    if (!res.ok) { setAuthError('login-error', res.d.detail || 'Login failed'); return; }
+    if (!res.ok) {
+      setAuthError('login-error', res.d.detail || ('Login failed — status ' + res.status));
+      return;
+    }
     onAuthSuccess(res.d);
   })
   .catch(function(err) {
-    var aborted = err && err.name === 'AbortError';
+    // Capture exact browser error for diagnosis
+    var errDetail = err ? (err.name + ': ' + err.message) : 'network error';
     if (attempt === 1) {
-      btn.textContent = 'Still connecting… please wait';
-      setAuthError('login-error', 'Server is starting up. Retrying automatically…');
-      _setServerStatus('⏳ Server cold-start in progress — retrying login…');
-      setTimeout(function() { _doLogin(btn, 2); }, 8000);
+      btn.textContent = 'Retrying…';
+      setAuthError('login-error', 'Connection issue, retrying… (' + errDetail + ')');
+      setTimeout(function() { _doLogin(btn, 2); }, 5000);
     } else {
       btn.disabled = false; btn.textContent = 'Sign In';
-      setAuthError('login-error', 'Server is still warming up. Please wait 10 seconds and try again.');
+      setAuthError('login-error', 'Failed: ' + errDetail + ' — check your connection and try again.');
     }
   });
 }
