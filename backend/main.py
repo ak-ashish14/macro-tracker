@@ -11,12 +11,17 @@ PUT  /auth/profile          update name/age/gender/weight/height
 PUT  /auth/password         change password
 POST /api/suggest           ingredient → BM25 → macro filter → Claude → top 5
 POST /api/lookup            food name → Claude macro estimate → add to index
+GET  /api/workouts          static workout + exercise list with stable UUIDs
+POST /api/exercise/save     persist exercise sets + calories to DB
+POST /api/activity/log      persist custom activity to DB
+GET  /api/workout/today     return full workout log for user+date
 """
 
 import json
 import os
 import re
 import sys
+import uuid as _uuid_mod
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -33,6 +38,42 @@ from rank_bm25 import BM25Okapi
 
 # ── Paths ─────────────────────────────────────────────────────────────────
 BASE      = os.path.dirname(__file__)
+
+# ── Static workout seed data (mirrors WORKOUTS_DATA in frontend) ───────────
+_WORKOUT_SEED = [
+    {
+        'name': 'Workout 1 - Push',
+        'exercises': ['Dumbbell Bench Press', 'Incline Dumbbell Bench Press', 'Dip', 'Seated Triceps Press'],
+    },
+    {
+        'name': 'Workout 2 - Pull',
+        'exercises': ['Dumbbell Deadlift', 'One-Arm Dumbbell Row', 'Chin-up', 'Alternating Dumbbell Curl'],
+    },
+    {
+        'name': 'Workout 3 - Upper Body A',
+        'exercises': ['Seated Dumbbell Press', 'Dumbbell Side Lateral Raise',
+                      'Dumbbell Rear Lateral Raise (Seated)', 'Seated Triceps Press'],
+    },
+    {
+        'name': 'Workout 4 - Legs',
+        'exercises': ['Dumbbell Goblet Squat', 'Single Leg Split Squat (Dumbbell)',
+                      'Dumbbell Romanian Deadlift', 'Dumbbell Lunge (In-Place)'],
+    },
+    {
+        'name': 'Workout 5 - Upper Body B',
+        'exercises': ['Close-Grip Dumbbell Bench Press', 'Chin-up',
+                      'Two-Arm Dumbbell Row', 'Alternating Dumbbell Curl'],
+    },
+]
+
+# Deterministic UUIDs derived from names — stable across restarts
+_UUID_NS = _uuid_mod.UUID('6ba7b810-9dad-11d1-80b4-00c04fd430c8')  # URL namespace
+
+def _workout_uuid(name: str) -> str:
+    return str(_uuid_mod.uuid5(_UUID_NS, f'workout::{name}'))
+
+def _exercise_uuid(workout_name: str, ex_name: str) -> str:
+    return str(_uuid_mod.uuid5(_UUID_NS, f'exercise::{workout_name}::{ex_name}'))
 META_PATH = os.path.join(BASE, 'foods_meta.json')
 
 # ── Auth config ────────────────────────────────────────────────────────────
@@ -103,6 +144,92 @@ def _init_db() -> None:
                     PRIMARY KEY (username, date)
                 )
             """)
+
+            # ── Workout / Exercise static tables ───────────────────────────
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS workouts (
+                    id   UUID PRIMARY KEY,
+                    name TEXT NOT NULL UNIQUE
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS exercises (
+                    id            UUID PRIMARY KEY,
+                    workout_id    UUID REFERENCES workouts(id) ON DELETE CASCADE,
+                    name          TEXT NOT NULL,
+                    display_order INT,
+                    UNIQUE(workout_id, name)
+                )
+            """)
+
+            # ── Per-day workout log ────────────────────────────────────────
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS daily_workout_logs (
+                    id                    UUID PRIMARY KEY,
+                    username              TEXT NOT NULL,
+                    workout_id            UUID REFERENCES workouts(id),
+                    date                  DATE NOT NULL,
+                    total_calories_burned INT  DEFAULT 0,
+                    created_at            TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            # Partial unique indexes handle NULL workout_id (activity-only) separately
+            cur.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS udx_dwl_workout
+                ON daily_workout_logs(username, workout_id, date)
+                WHERE workout_id IS NOT NULL
+            """)
+            cur.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS udx_dwl_noworkout
+                ON daily_workout_logs(username, date)
+                WHERE workout_id IS NULL
+            """)
+
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS exercise_logs (
+                    id              UUID PRIMARY KEY,
+                    daily_log_id    UUID REFERENCES daily_workout_logs(id) ON DELETE CASCADE,
+                    exercise_id     UUID REFERENCES exercises(id),
+                    calories_burned INT DEFAULT 0,
+                    UNIQUE(daily_log_id, exercise_id)
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS set_logs (
+                    id              UUID PRIMARY KEY,
+                    exercise_log_id UUID REFERENCES exercise_logs(id) ON DELETE CASCADE,
+                    set_number      INT,
+                    weight          FLOAT,
+                    reps            INT,
+                    note            TEXT
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS activity_logs (
+                    id               UUID PRIMARY KEY,
+                    daily_log_id     UUID REFERENCES daily_workout_logs(id) ON DELETE CASCADE,
+                    activity_name    TEXT,
+                    duration_minutes INT,
+                    intensity        TEXT,
+                    calories_burned  INT
+                )
+            """)
+
+            # ── Seed static workouts and exercises ─────────────────────────
+            for workout in _WORKOUT_SEED:
+                w_id = _workout_uuid(workout['name'])
+                cur.execute(
+                    "INSERT INTO workouts (id, name) VALUES (%s, %s) ON CONFLICT (id) DO NOTHING",
+                    (w_id, workout['name'])
+                )
+                for order, ex_name in enumerate(workout['exercises']):
+                    e_id = _exercise_uuid(workout['name'], ex_name)
+                    cur.execute(
+                        """INSERT INTO exercises (id, workout_id, name, display_order)
+                           VALUES (%s, %s, %s, %s) ON CONFLICT (id) DO NOTHING""",
+                        (e_id, w_id, ex_name, order)
+                    )
+
     conn.close()
     print("Database ready.")
 
@@ -884,6 +1011,242 @@ def estimate_activity_calories(req: ActivityCaloriesRequest, user: dict = Depend
     except Exception:
         # MET fallback: moderate running ~8 kcal/min
         return {'calories_burned': max(0, req.duration * 6)}
+
+
+# ── Workout persistence ────────────────────────────────────────────────────
+
+@app.get('/api/workouts')
+def get_workouts():
+    """Return static workout + exercise list with stable UUIDs (no auth needed)."""
+    conn = _db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute('SELECT id, name FROM workouts ORDER BY name')
+            workouts = [dict(r) for r in cur.fetchall()]
+            for w in workouts:
+                cur.execute(
+                    'SELECT id, name, display_order FROM exercises WHERE workout_id = %s ORDER BY display_order',
+                    (str(w['id']),)
+                )
+                w['exercises'] = [
+                    {'id': str(e['id']), 'name': e['name'], 'display_order': e['display_order']}
+                    for e in cur.fetchall()
+                ]
+                w['id'] = str(w['id'])
+    finally:
+        conn.close()
+    return workouts
+
+
+class SetLogItem(BaseModel):
+    set: int
+    weight: float = 0.0
+    reps:   int   = 0
+    note:   str   = ''
+
+
+class SaveExerciseRequest(BaseModel):
+    workout_id:      str
+    exercise_id:     str
+    date:            str
+    sets:            list[SetLogItem]
+    calories_burned: int
+
+
+class LogActivityRequest(BaseModel):
+    workout_id:       Optional[str] = None
+    date:             str
+    activity_name:    str
+    duration_minutes: int
+    intensity:        str
+    calories_burned:  int
+
+
+def _find_or_create_daily_log(cur, username: str, workout_id, date: str) -> str:
+    """Return daily_workout_log id, creating it if absent. workout_id may be None."""
+    new_id = str(_uuid_mod.uuid4())
+    if workout_id is not None:
+        cur.execute(
+            """INSERT INTO daily_workout_logs (id, username, workout_id, date, total_calories_burned)
+               VALUES (%s, %s, %s, %s, 0)
+               ON CONFLICT (username, workout_id, date) WHERE workout_id IS NOT NULL DO NOTHING""",
+            (new_id, username, workout_id, date)
+        )
+        cur.execute(
+            'SELECT id FROM daily_workout_logs WHERE username=%s AND workout_id=%s AND date=%s',
+            (username, workout_id, date)
+        )
+    else:
+        cur.execute(
+            """INSERT INTO daily_workout_logs (id, username, workout_id, date, total_calories_burned)
+               VALUES (%s, %s, NULL, %s, 0)
+               ON CONFLICT (username, date) WHERE workout_id IS NULL DO NOTHING""",
+            (new_id, username, date)
+        )
+        cur.execute(
+            'SELECT id FROM daily_workout_logs WHERE username=%s AND date=%s AND workout_id IS NULL',
+            (username, date)
+        )
+    row = cur.fetchone()
+    return str(row['id'])
+
+
+def _recalc_total(cur, daily_log_id: str) -> None:
+    """Sum exercise + activity calories and write to daily_workout_logs.total_calories_burned."""
+    cur.execute("""
+        UPDATE daily_workout_logs SET total_calories_burned = (
+            SELECT COALESCE(SUM(el.calories_burned), 0)
+            FROM exercise_logs el WHERE el.daily_log_id = %s
+        ) + (
+            SELECT COALESCE(SUM(al.calories_burned), 0)
+            FROM activity_logs al WHERE al.daily_log_id = %s
+        )
+        WHERE id = %s
+    """, (daily_log_id, daily_log_id, daily_log_id))
+
+
+@app.post('/api/exercise/save')
+def save_exercise(req: SaveExerciseRequest, user: dict = Depends(_get_user_from_token)):
+    """Persist exercise sets + calories. Upserts on (username, workout_id, date)."""
+    conn = _db()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                daily_log_id = _find_or_create_daily_log(
+                    cur, user['username'], req.workout_id, req.date
+                )
+
+                # Upsert exercise_log
+                ex_log_id = str(_uuid_mod.uuid4())
+                cur.execute("""
+                    INSERT INTO exercise_logs (id, daily_log_id, exercise_id, calories_burned)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (daily_log_id, exercise_id)
+                    DO UPDATE SET calories_burned = EXCLUDED.calories_burned
+                    RETURNING id
+                """, (ex_log_id, daily_log_id, req.exercise_id, req.calories_burned))
+                ex_log_id = str(cur.fetchone()['id'])
+
+                # Replace set_logs
+                cur.execute('DELETE FROM set_logs WHERE exercise_log_id = %s', (ex_log_id,))
+                for s in req.sets:
+                    cur.execute("""
+                        INSERT INTO set_logs (id, exercise_log_id, set_number, weight, reps, note)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                    """, (str(_uuid_mod.uuid4()), ex_log_id, s.set, s.weight, s.reps, s.note))
+
+                _recalc_total(cur, daily_log_id)
+    finally:
+        conn.close()
+    return {'ok': True}
+
+
+@app.post('/api/activity/log')
+def log_activity(req: LogActivityRequest, user: dict = Depends(_get_user_from_token)):
+    """Append a custom activity and update total calories for the day."""
+    conn = _db()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                daily_log_id = _find_or_create_daily_log(
+                    cur, user['username'], req.workout_id or None, req.date
+                )
+
+                cur.execute("""
+                    INSERT INTO activity_logs
+                        (id, daily_log_id, activity_name, duration_minutes, intensity, calories_burned)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                """, (str(_uuid_mod.uuid4()), daily_log_id,
+                      req.activity_name, req.duration_minutes,
+                      req.intensity, req.calories_burned))
+
+                _recalc_total(cur, daily_log_id)
+    finally:
+        conn.close()
+    return {'ok': True}
+
+
+@app.get('/api/workout/today')
+def get_workout_today(date: str, user: dict = Depends(_get_user_from_token)):
+    """Return all logged workout + activity data for the user on a given date."""
+    conn = _db()
+    try:
+        with conn.cursor() as cur:
+            # All workout-based daily logs for this user+date
+            cur.execute("""
+                SELECT dwl.id, dwl.workout_id, dwl.total_calories_burned, w.name AS workout_name
+                FROM daily_workout_logs dwl
+                JOIN workouts w ON w.id = dwl.workout_id
+                WHERE dwl.username = %s AND dwl.date = %s AND dwl.workout_id IS NOT NULL
+            """, (user['username'], date))
+            workout_log_rows = [dict(r) for r in cur.fetchall()]
+
+            result = {
+                'workout_logs':          [],
+                'activity_logs':         [],
+                'total_calories_burned': 0,
+            }
+
+            for wl in workout_log_rows:
+                daily_log_id = str(wl['id'])
+
+                # Exercise logs
+                cur.execute("""
+                    SELECT el.id, el.exercise_id, el.calories_burned, e.name AS exercise_name
+                    FROM exercise_logs el
+                    JOIN exercises e ON e.id = el.exercise_id
+                    WHERE el.daily_log_id = %s
+                """, (daily_log_id,))
+                exercise_logs = []
+                for el in cur.fetchall():
+                    el = dict(el)
+                    ex_log_id = str(el['id'])
+                    cur.execute(
+                        'SELECT set_number, weight, reps, note FROM set_logs WHERE exercise_log_id = %s ORDER BY set_number',
+                        (ex_log_id,)
+                    )
+                    el['sets']        = [dict(s) for s in cur.fetchall()]
+                    el['id']          = ex_log_id
+                    el['exercise_id'] = str(el['exercise_id'])
+                    exercise_logs.append(el)
+
+                # Activity logs tied to this workout daily log
+                cur.execute("""
+                    SELECT activity_name, duration_minutes, intensity, calories_burned
+                    FROM activity_logs WHERE daily_log_id = %s
+                """, (daily_log_id,))
+                act_logs = [dict(r) for r in cur.fetchall()]
+
+                result['workout_logs'].append({
+                    'daily_log_id':          daily_log_id,
+                    'workout_id':            str(wl['workout_id']),
+                    'workout_name':          wl['workout_name'],
+                    'total_calories_burned': wl['total_calories_burned'],
+                    'exercise_logs':         exercise_logs,
+                })
+                result['activity_logs'].extend(act_logs)
+                result['total_calories_burned'] += (wl['total_calories_burned'] or 0)
+
+            # Activity-only daily log (workout_id IS NULL)
+            cur.execute("""
+                SELECT id, total_calories_burned
+                FROM daily_workout_logs
+                WHERE username = %s AND date = %s AND workout_id IS NULL
+            """, (user['username'], date))
+            ao_row = cur.fetchone()
+            if ao_row:
+                ao_log_id = str(ao_row['id'])
+                cur.execute("""
+                    SELECT activity_name, duration_minutes, intensity, calories_burned
+                    FROM activity_logs WHERE daily_log_id = %s
+                """, (ao_log_id,))
+                ao_acts = [dict(r) for r in cur.fetchall()]
+                result['activity_logs'].extend(ao_acts)
+                result['total_calories_burned'] += (ao_row['total_calories_burned'] or 0)
+
+    finally:
+        conn.close()
+    return result
 
 
 @app.post('/api/lookup', response_model=LookupResponse)

@@ -1260,6 +1260,7 @@ function onAuthSuccess(data) {
 
 function _showMainApp() {
   syncMealsFromServer();
+  _loadWorkoutIds();   // fetch workout UUIDs + hydrate today's exercise data
   document.getElementById('btn-profile').style.display = '';
   document.getElementById('bottom-nav').style.display = 'flex';
   var label = currentUser.name || currentUser.email || currentUser.username || '?';
@@ -2841,6 +2842,101 @@ var WORKOUTS_DATA = [
   }
 ];
 
+// ── Workout DB map (populated after login from GET /api/workouts) ───────────
+// _workoutDbMap[i] = { id: 'uuid', exercises: { 'Exercise Name': 'uuid', … } }
+var _workoutDbMap   = [];
+var _hydratedDates  = {};   // { 'YYYY-MM-DD': true } — prevents double-fetching
+
+function _loadWorkoutIds() {
+  if (!currentUser) return;
+  fetch(API_BASE + '/api/workouts', { headers: authHeaders() })
+    .then(function(r) { return r.json(); })
+    .then(function(workouts) {
+      // Map by workout name to align with WORKOUTS_DATA index order
+      _workoutDbMap = WORKOUTS_DATA.map(function(wd) {
+        var dbW = null;
+        for (var i = 0; i < workouts.length; i++) {
+          if (workouts[i].name === wd.name) { dbW = workouts[i]; break; }
+        }
+        if (!dbW) return null;
+        var exMap = {};
+        (dbW.exercises || []).forEach(function(e) { exMap[e.name] = e.id; });
+        return { id: dbW.id, exercises: exMap };
+      });
+      // Immediately hydrate today's data from server
+      _hydrateExerciseFromServer(currentDate);
+    })
+    .catch(function() { /* silent — localStorage is always the primary source */ });
+}
+
+function _hydrateExerciseFromServer(date) {
+  if (_hydratedDates[date]) return;
+  _hydratedDates[date] = true;
+  if (!currentUser) return;
+
+  fetch(API_BASE + '/api/workout/today?date=' + date, { headers: authHeaders() })
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+      var data    = _getExStore();
+      var changed = false;
+
+      // Merge exercise sets + calories from each workout log
+      (res.workout_logs || []).forEach(function(wl) {
+        // Restore workout selection if not already set
+        if (data.workoutIndex === null || data.workoutIndex === undefined) {
+          for (var i = 0; i < WORKOUTS_DATA.length; i++) {
+            if (WORKOUTS_DATA[i].name === wl.workout_name) {
+              data.workoutIndex = i;
+              changed = true;
+              break;
+            }
+          }
+        }
+        (wl.exercise_logs || []).forEach(function(el) {
+          // Restore sets (only if nothing logged locally yet)
+          if (el.sets && el.sets.length > 0) {
+            if (!data.setData) data.setData = {};
+            if (!data.setData[el.exercise_name]) {
+              data.setData[el.exercise_name] = el.sets.map(function(s) {
+                return { weight: s.weight || '', reps: s.reps || '', notes: s.note || '' };
+              });
+              changed = true;
+            }
+          }
+          // Restore calories
+          if (el.calories_burned > 0) {
+            if (!data.exerciseCalories) data.exerciseCalories = {};
+            if (!data.exerciseCalories[el.exercise_name]) {
+              data.exerciseCalories[el.exercise_name] = el.calories_burned;
+              changed = true;
+            }
+          }
+        });
+      });
+
+      // Merge activity logs (only if nothing logged locally)
+      var serverActs = res.activity_logs || [];
+      if (serverActs.length > 0 && (!data.activityLogs || data.activityLogs.length === 0)) {
+        data.activityLogs = serverActs.map(function(a) {
+          return {
+            activity: a.activity_name,
+            duration: a.duration_minutes,
+            intensity: a.intensity,
+            calories: a.calories_burned,
+          };
+        });
+        changed = true;
+      }
+
+      if (changed) {
+        data.totalCalories = _sumCalories(data);
+        _saveExStore(data);
+        if (_activeTab === 'exercise') renderExerciseTab();
+      }
+    })
+    .catch(function() { /* silent */ });
+}
+
 // ── Exercise store helpers ──────────────────────────────────────────────────
 
 function _exKey() { return 'mt_ex_' + currentDate; }
@@ -2858,6 +2954,9 @@ function _saveExStore(data) {
 // ── Render exercise tab ─────────────────────────────────────────────────────
 
 function renderExerciseTab() {
+  // Hydrate from server for this date if not done yet (idempotent)
+  _hydrateExerciseFromServer(currentDate);
+
   var data   = _getExStore();
   var select = document.getElementById('ex-workout-select');
 
@@ -3033,6 +3132,31 @@ function _saveExercise(exIdx) {
     status.className   = 'ex-save-status ok';
     btn.disabled = false;
 
+    // ── Persist to backend ──────────────────────────────────────────────
+    var wMap = _workoutDbMap[workoutIdx];
+    if (wMap && wMap.exercises && wMap.exercises[ex.name]) {
+      var allSets = ex.sets.map(function(s, si) {
+        var sv = ((data.setData || {})[ex.name] || [])[si] || {};
+        return {
+          set: si + 1,
+          weight: parseFloat(sv.weight) || 0,
+          reps:   parseInt(sv.reps)     || 0,
+          note:   sv.notes || '',
+        };
+      });
+      fetch(API_BASE + '/api/exercise/save', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({
+          workout_id:      wMap.id,
+          exercise_id:     wMap.exercises[ex.name],
+          date:            currentDate,
+          sets:            allSets,
+          calories_burned: burned,
+        }),
+      }).catch(function() { /* silent – localStorage already saved */ });
+    }
+
     // Refresh badge on card header
     var badge = document.querySelector('#ex-card-' + exIdx + ' .ex-kcal-badge');
     if (badge) { badge.textContent = '🔥 ' + burned + ' kcal'; }
@@ -3149,6 +3273,22 @@ function submitActivity() {
     data.totalCalories = _sumCalories(data);
     _saveExStore(data);
     _updateCaloriesBanner(data);
+
+    // ── Persist to backend ────────────────────────────────────────────────
+    var wIdx2 = parseInt(document.getElementById('ex-workout-select').value);
+    var wId2  = (!isNaN(wIdx2) && _workoutDbMap[wIdx2]) ? _workoutDbMap[wIdx2].id : null;
+    fetch(API_BASE + '/api/activity/log', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        workout_id:       wId2,
+        date:             currentDate,
+        activity_name:    activity,
+        duration_minutes: duration,
+        intensity:        intensity,
+        calories_burned:  burned,
+      }),
+    }).catch(function() { /* silent – localStorage already saved */ });
 
     btn.disabled = false;
     btn.textContent = 'Log Another';
