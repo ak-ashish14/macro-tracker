@@ -633,6 +633,7 @@
       <input class="auth-input" type="password" id="login-password" placeholder="Password" autocomplete="current-password" />
       <button class="auth-btn" id="btn-login">Sign In</button>
       <div class="auth-error" id="login-error"></div>
+      <div id="server-status" style="font-size:0.72rem;color:var(--text-dim);text-align:center;margin-top:8px;min-height:16px"></div>
     </div>
 
     <!-- Register: email + password only -->
@@ -1322,37 +1323,76 @@ document.getElementById('btn-wc-start').onclick = _dismissWelcome;
 
 // ── Login ──────────────────────────────────────────────────────────────────────────────────
 
-// Warm up the Render backend as soon as the page loads so cold-start latency
-// is served before the user finishes typing their credentials.
-(function _warmServer() {
-  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') return;
-  fetch('/health', { method: 'GET' }).catch(function() {});
-})();
+// ── Server warm-up + status indicator ─────────────────────────────────────
+// Polls /health every 6 s until the backend responds, then marks it ready.
+// Shows a subtle status line under the Sign In button.
+var _serverReady = false;
+var _serverPollTimer = null;
+
+function _setServerStatus(msg, colour) {
+  var el = document.getElementById('server-status');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = colour || 'var(--text-dim)';
+}
+
+function _pollServerHealth() {
+  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+    _serverReady = true; return;
+  }
+  _setServerStatus('⏳ Connecting to server…');
+  (function ping() {
+    fetch('/health', { method: 'GET' })
+      .then(function(r) { return r.ok ? r.json() : Promise.reject(); })
+      .then(function() {
+        _serverReady = true;
+        _setServerStatus('✓ Server ready', '#34d399');
+        setTimeout(function() { _setServerStatus(''); }, 3000);
+      })
+      .catch(function() {
+        _setServerStatus('⏳ Server is starting up — this can take ~1 min on first load…');
+        _serverPollTimer = setTimeout(ping, 6000);
+      });
+  })();
+}
+
+_pollServerHealth();
+
+// ── Login with explicit timeout + auto-retry ────────────────────────────────
+function _fetchWithTimeout(url, opts, ms) {
+  var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  var timer = ctrl ? setTimeout(function() { ctrl.abort(); }, ms) : null;
+  var req   = fetch(url, ctrl ? Object.assign({}, opts, { signal: ctrl.signal }) : opts);
+  return req.finally ? req.finally(function() { if (timer) clearTimeout(timer); }) : req;
+}
 
 function _doLogin(btn, attempt) {
   var payload = JSON.stringify({
     email:    document.getElementById('login-email').value.trim(),
     password: document.getElementById('login-password').value,
   });
-  fetch(API_BASE + '/auth/login', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: payload,
-  })
+  // 50-second timeout per attempt — covers Render cold-start fully
+  _fetchWithTimeout(
+    API_BASE + '/auth/login',
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload },
+    50000
+  )
   .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, d: d }; }); })
   .then(function(res) {
     btn.disabled = false; btn.textContent = 'Sign In';
     if (!res.ok) { setAuthError('login-error', res.d.detail || 'Login failed'); return; }
     onAuthSuccess(res.d);
   })
-  .catch(function() {
-    // First failure is almost always a Render cold-start timeout — retry once automatically
+  .catch(function(err) {
+    var aborted = err && err.name === 'AbortError';
     if (attempt === 1) {
-      btn.textContent = 'Server warming up… retrying';
-      setAuthError('login-error', 'Server is starting up, retrying…');
-      setTimeout(function() { _doLogin(btn, 2); }, 4000);
+      btn.textContent = 'Still connecting… please wait';
+      setAuthError('login-error', 'Server is starting up. Retrying automatically…');
+      _setServerStatus('⏳ Server cold-start in progress — retrying login…');
+      setTimeout(function() { _doLogin(btn, 2); }, 8000);
     } else {
       btn.disabled = false; btn.textContent = 'Sign In';
-      setAuthError('login-error', 'Server took too long to respond. Please try again.');
+      setAuthError('login-error', 'Server is still warming up. Please wait 10 seconds and try again.');
     }
   });
 }
