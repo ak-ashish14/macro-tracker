@@ -2389,12 +2389,15 @@ function renderReport() {
 }
 
 /* ── Goals ── */
-document.getElementById('btn-goals').onclick = function() {
-  document.getElementById('g-protein').value = store.goals.protein;
-  document.getElementById('g-carbs').value = store.goals.carbs;
-  document.getElementById('g-fat').value = store.goals.fat;
-  openModal('modal-goals');
-};
+(function() {
+  var btnGoals = document.getElementById('btn-goals');
+  if (btnGoals) btnGoals.onclick = function() {
+    document.getElementById('g-protein').value = store.goals.protein;
+    document.getElementById('g-carbs').value = store.goals.carbs;
+    document.getElementById('g-fat').value = store.goals.fat;
+    openModal('modal-goals');
+  };
+})();
 
 document.getElementById('btn-save-goals').onclick = function() {
   var g = {
