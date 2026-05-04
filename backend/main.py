@@ -9,8 +9,8 @@ POST /auth/login            returns JWT token
 GET  /auth/me               current user profile
 PUT  /auth/profile          update name/age/gender/weight/height
 PUT  /auth/password         change password
-POST /api/suggest           ingredient → BM25 → macro filter → Claude → top 5
-POST /api/lookup            food name → Claude macro estimate → add to index
+POST /api/suggest           ingredient → BM25 → macro filter → Gemini → top 5
+POST /api/lookup            food name → Gemini macro estimate → add to index
 GET  /api/workouts          static workout + exercise list with stable UUIDs
 POST /api/exercise/save     persist exercise sets + calories to DB
 POST /api/activity/log      persist custom activity to DB
@@ -21,12 +21,13 @@ import json
 import os
 import re
 import sys
+import time
 import uuid as _uuid_mod
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from groq import Groq
+import requests
 import psycopg2
 import psycopg2.extras
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -81,6 +82,13 @@ SECRET_KEY        = os.environ.get('SECRET_KEY', 'macrotrack-dev-secret-change-m
 ALGORITHM         = 'HS256'
 TOKEN_EXPIRE_DAYS = 30
 DATABASE_URL      = os.environ.get('DATABASE_URL', '')
+
+# ── Gemini config ──────────────────────────────────────────────────────────
+GEMINI_API_KEY  = os.environ.get('GEMINI_API_KEY', '')
+GEMINI_ENDPOINT = (
+    'https://generativelanguage.googleapis.com/v1beta/models/'
+    'gemini-2.5-flash-lite:generateContent'
+)
 
 pwd_ctx = CryptContext(schemes=['bcrypt'], deprecated='auto')
 
@@ -368,13 +376,12 @@ async def lifespan(app: FastAPI):
     print(f"Building BM25 index for {len(foods)} foods …")
     resources['bm25'] = _build_bm25(foods)
 
-    groq_key = os.environ.get('GROQ_API_KEY')
-    if groq_key:
-        resources['groq'] = Groq(api_key=groq_key)
-        print("Groq API ready.")
+    if GEMINI_API_KEY:
+        resources['gemini_ready'] = True
+        print("Gemini API ready.")
     else:
-        resources['groq'] = None
-        print("WARNING: GROQ_API_KEY not set – AI food lookup disabled.", file=sys.stderr)
+        resources['gemini_ready'] = False
+        print("WARNING: GEMINI_API_KEY not set – AI food lookup disabled.", file=sys.stderr)
     print(f"Ready – {len(foods)} foods indexed.")
     yield
     resources.clear()
@@ -503,16 +510,55 @@ class LookupResponse(BaseModel):
 
 # ── AI helpers ─────────────────────────────────────────────────────────────
 
-def _call_ai(prompt: str, max_tokens: int = 512) -> str:
-    client = resources.get('groq')
-    if client is None:
-        raise RuntimeError('GROQ_API_KEY is not set. Add it in the Render dashboard under Environment Variables.')
-    resp = client.chat.completions.create(
-        model='llama-3.1-8b-instant',
-        messages=[{'role': 'user', 'content': prompt}],
-        max_tokens=max_tokens,
-    )
-    return resp.choices[0].message.content.strip()
+def _call_ai(prompt: str, max_tokens: int = 512, retries: int = 3) -> str:
+    """Call the Gemini generateContent API with exponential backoff retry."""
+    if not GEMINI_API_KEY:
+        raise RuntimeError(
+            'GEMINI_API_KEY is not set. Add it in the Render dashboard under Environment Variables.'
+        )
+
+    url     = f'{GEMINI_ENDPOINT}?key={GEMINI_API_KEY}'
+    payload = {
+        'contents': [{'parts': [{'text': prompt}]}],
+        'generationConfig': {'maxOutputTokens': max_tokens},
+    }
+    headers = {'Content-Type': 'application/json'}
+
+    last_err: Exception | None = None
+    for attempt in range(retries):
+        try:
+            resp = requests.post(url, json=payload, headers=headers, timeout=30)
+            if resp.status_code == 429:
+                # Rate-limited — back off and retry
+                wait = 2 ** attempt
+                print(f"Gemini rate-limited; retrying in {wait}s (attempt {attempt + 1})", file=sys.stderr)
+                time.sleep(wait)
+                continue
+            resp.raise_for_status()
+            data = resp.json()
+            # Extract text from Gemini response structure
+            candidates = data.get('candidates', [])
+            if not candidates:
+                raise ValueError(f'Gemini returned no candidates: {data}')
+            parts = candidates[0].get('content', {}).get('parts', [])
+            if not parts:
+                raise ValueError(f'Gemini candidate had no parts: {candidates[0]}')
+            return parts[0].get('text', '').strip()
+        except requests.exceptions.Timeout as e:
+            last_err = e
+            wait = 2 ** attempt
+            print(f"Gemini timeout on attempt {attempt + 1}; retrying in {wait}s", file=sys.stderr)
+            time.sleep(wait)
+        except requests.exceptions.RequestException as e:
+            last_err = e
+            if attempt < retries - 1:
+                wait = 2 ** attempt
+                print(f"Gemini request error on attempt {attempt + 1}: {e}; retrying in {wait}s", file=sys.stderr)
+                time.sleep(wait)
+            else:
+                raise RuntimeError(f'Gemini API error after {retries} attempts: {e}') from e
+
+    raise RuntimeError(f'Gemini API failed after {retries} attempts: {last_err}')
 
 
 # ── Macro helpers ──────────────────────────────────────────────────────────
@@ -842,7 +888,7 @@ def health():
 
 
 def _suggest_with_ai_new(req: SuggestRequest) -> list[dict]:
-    """Ask Groq to generate 5 meal suggestions from scratch using macro budget,
+    """Ask Gemini to generate 5 meal suggestions from scratch using macro budget,
     optional ingredients, and past-meal history for taste alignment."""
     rem = (f"Remaining calories: {req.remaining_kcal:.0f} kcal | "
            f"Protein: {req.remaining_protein:.1f}g | "
@@ -913,7 +959,7 @@ def _suggest_with_ai_new(req: SuggestRequest) -> list[dict]:
 
 @app.post('/api/suggest', response_model=SuggestResponse)
 def suggest(req: SuggestRequest):
-    # Primary path: ask Groq to generate dishes directly
+    # Primary path: ask Gemini to generate dishes directly
     try:
         dishes = _suggest_with_ai_new(req)
         if not dishes:
@@ -950,7 +996,7 @@ class ActivityCaloriesRequest(BaseModel):
 
 @app.post('/api/exercise/calories')
 def estimate_exercise_calories(req: ExerciseCaloriesRequest, user: dict = Depends(_get_user_from_token)):
-    """Use Groq to estimate kcal burned from a resistance exercise."""
+    """Use Gemini to estimate kcal burned from a resistance exercise."""
     sets_desc = ', '.join(
         f"Set {i+1}: {s.get('weight','?')}kg × {s.get('reps','?')} reps"
         for i, s in enumerate(req.sets)
@@ -988,7 +1034,7 @@ def estimate_exercise_calories(req: ExerciseCaloriesRequest, user: dict = Depend
 
 @app.post('/api/activity/calories')
 def estimate_activity_calories(req: ActivityCaloriesRequest, user: dict = Depends(_get_user_from_token)):
-    """Use Groq to estimate kcal burned from a free-form activity."""
+    """Use Gemini to estimate kcal burned from a free-form activity."""
     weight_kg = user.get('weight_kg') or 75
     prompt = (
         f"Estimate the net calories burned (above resting) for this activity.\n"
