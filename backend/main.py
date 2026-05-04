@@ -592,6 +592,7 @@ class SuggestRequest(BaseModel):
     remaining_fat:     float = 0
     remaining_kcal:    float = 0
     past_meals:        list[str] = []
+    diet_preference:   Optional[str] = None   # VEG | NON_VEG | EGGETARIAN
 
 
 class Dish(BaseModel):
@@ -995,9 +996,29 @@ def health():
     }
 
 
+_DIET_RULES = {
+    'VEG': (
+        "🚫 STRICT DIETARY RULE — The user is VEGETARIAN. "
+        "You MUST suggest ONLY vegetarian dishes. "
+        "Absolutely NO meat, poultry, seafood, or eggs in any form. "
+        "Dairy (milk, paneer, curd, ghee, cheese) is allowed."
+    ),
+    'EGGETARIAN': (
+        "🚫 STRICT DIETARY RULE — The user is EGGETARIAN (vegetarian + eggs). "
+        "You MUST suggest ONLY vegetarian or egg-based dishes. "
+        "Absolutely NO meat, poultry, or seafood. "
+        "Eggs and dairy are allowed."
+    ),
+    'NON_VEG': (
+        "ℹ️ DIETARY PREFERENCE — The user eats non-vegetarian food. "
+        "You may include meat, poultry, seafood, and egg-based dishes where they best fit the macro goals."
+    ),
+}
+
+
 def _suggest_with_ai_new(req: SuggestRequest) -> list[dict]:
     """Ask Gemini to generate 5 meal suggestions from scratch using macro budget,
-    optional ingredients, and past-meal history for taste alignment."""
+    optional ingredients, past-meal history, and diet preference."""
     rem = (f"Remaining calories: {req.remaining_kcal:.0f} kcal | "
            f"Protein: {req.remaining_protein:.1f}g | "
            f"Carbs: {req.remaining_carbs:.1f}g | "
@@ -1007,6 +1028,12 @@ def _suggest_with_ai_new(req: SuggestRequest) -> list[dict]:
         "You are a smart nutrition assistant for an Indian food tracking app.",
         f"User's remaining nutrition budget for today: {rem}",
     ]
+
+    # ── Diet preference rule (injected early so Gemini treats it as hard constraint) ──
+    diet_pref = (req.diet_preference or '').upper().strip()
+    diet_rule = _DIET_RULES.get(diet_pref)
+    if diet_rule:
+        parts.append(diet_rule)
 
     if req.ingredients.strip():
         parts.append(f'Ingredients the user has available: "{req.ingredients.strip()}"')
@@ -1031,6 +1058,7 @@ def _suggest_with_ai_new(req: SuggestRequest) -> list[dict]:
         "\nRules for your suggestions:"
         "\n- Each dish must be a COMPLETE meal or snack (not a condiment, pickle, sauce, chutney, or side)"
         "\n- Each dish must be 500 kcal or less per serving"
+        "\n- Strictly honour the dietary rule stated above — violating it is not acceptable"
         "\n- Prioritise healthy, balanced, and genuinely tasty options — think dal, sabzi, grilled protein, rice bowls, wraps, salads, etc."
         "\n- Avoid deep-fried heavy items; prefer grilled, baked, steamed, or lightly sautéed"
         "\nSuggest the TOP 5 dishes that best fit within this nutrition budget."
@@ -1040,6 +1068,15 @@ def _suggest_with_ai_new(req: SuggestRequest) -> list[dict]:
     )
 
     prompt = '\n'.join(parts)
+
+    # ── Log the full prompt so it's visible in Render logs ───────────────────
+    print(
+        f"\n[SUGGEST_PROMPT] diet={diet_pref or 'not_set'} "
+        f"kcal_rem={req.remaining_kcal:.0f} "
+        f"ingredients={req.ingredients.strip()!r}\n"
+        f"{'─'*60}\n{prompt}\n{'─'*60}"
+    )
+
     text = _call_ai(prompt, max_tokens=1024)
     m = re.search(r'\[.*?\]', text, re.DOTALL)
     if not m:

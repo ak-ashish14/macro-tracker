@@ -2738,14 +2738,15 @@ function findDishes() {
   // ── Call backend API ─────────────────────────────────────────────────
   fetch(API_BASE + '/api/suggest', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders(),
     body: JSON.stringify({
       ingredients:       raw,
       remaining_protein: rem.protein,
       remaining_carbs:   rem.carbs,
       remaining_fat:     rem.fat,
       remaining_kcal:    rem.kcal,
-      past_meals:        pastMeals
+      past_meals:        pastMeals,
+      diet_preference:   currentUser ? (currentUser.diet_preference || null) : null
     })
   })
   .then(function(r) {
