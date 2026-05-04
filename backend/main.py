@@ -520,7 +520,7 @@ def _call_ai(prompt: str, max_tokens: int = 512, retries: int = 3) -> str:
     url     = f'{GEMINI_ENDPOINT}?key={GEMINI_API_KEY}'
     payload = {
         'contents': [{'parts': [{'text': prompt}]}],
-        'generationConfig': {'maxOutputTokens': max_tokens},
+        'generationConfig': {'maxOutputTokens': max_tokens, 'temperature': 0},
     }
     headers = {'Content-Type': 'application/json'}
 
