@@ -605,6 +605,17 @@
     .ex-save-status.ok { color: #34d399; }
     .ex-save-status.err { color: var(--red); }
 
+    /* ── Progress tab ── */
+    .prog-range-btn {
+      padding: 7px 22px; border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--surface2); color: var(--text-dim);
+      font-size: 0.82rem; font-weight: 600; cursor: pointer;
+      transition: all .15s;
+    }
+    .prog-range-btn:hover { border-color: var(--accent2); color: var(--accent2); }
+    .prog-range-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 2px 12px rgba(108,99,255,.35); }
+
     /* Activity modal */
     .activity-option {
       padding: 9px 14px; background: var(--surface2); border: 1px solid var(--border);
@@ -614,6 +625,7 @@
     .activity-option:hover { border-color: var(--accent2); background: rgba(108,99,255,.08); }
     .activity-option.selected { border-color: var(--accent2); background: rgba(108,99,255,.12); color: var(--accent2); font-weight: 600; }
   </style>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
 
@@ -1204,6 +1216,26 @@
     <div class="modal-footer">
       <button class="btn btn-ghost" id="btn-cancel-goals">Cancel</button>
       <button class="btn btn-primary" id="btn-save-goals">Save Goals</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Progress Log Modal ════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="modal-progress-log">
+  <div class="modal">
+    <div class="modal-title" id="prog-modal-title">⚖️ Log Weight</div>
+    <p style="font-size:0.82rem;color:var(--text-dim);margin-bottom:16px" id="prog-modal-desc">Record your body weight to track progress over time.</p>
+    <div class="form-group">
+      <label>Date</label>
+      <input type="date" id="prog-log-date" />
+    </div>
+    <div class="form-group">
+      <label id="prog-log-label">Weight (kg)</label>
+      <input type="number" id="prog-log-value" step="0.1" min="0" placeholder="70.5" />
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-progress-log')">Cancel</button>
+      <button class="btn btn-primary" id="btn-save-progress">Save</button>
     </div>
   </div>
 </div>
@@ -3379,15 +3411,15 @@ render();
 // ── PROGRESS TAB ───────────────────────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════════════════
 
+var progressChart   = null;
+var progressRange   = 'weekly';   // 'weekly' | 'monthly'
+var progressLogType = 'weight';   // 'weight' | 'waist'
+
 function renderProgressTab() {
   var container = document.getElementById('progress-inner');
   if (!container) return;
 
-  // Gather weight logs from store
-  var weightLogs = store.weightLogs || {};
-  var dateKeys   = Object.keys(weightLogs).sort();
-
-  // Gather exercise history: scan all mt_ex_* localStorage keys
+  // ── Gather exercise history (localStorage) ──────────────────────────────
   var exHistory = {};
   for (var i = 0; i < localStorage.length; i++) {
     var k = localStorage.key(i);
@@ -3396,36 +3428,13 @@ function renderProgressTab() {
       try { exHistory[dateStr] = JSON.parse(localStorage.getItem(k)); } catch(e) {}
     }
   }
-
-  // ── Selected date info ───────────────────────────────────────────────────
-  var selectedWeight = weightLogs[currentDate];
-  var selectedEx     = exHistory[currentDate] || {};
-  var selectedMeals  = (store.meals && store.meals[currentDate]) || [];
-  var totalKcalIn    = 0;
-  selectedMeals.forEach(function(m) { totalKcalIn += Math.round(m.protein*4 + m.carbs*4 + m.fat*9); });
+  var selectedEx      = exHistory[currentDate] || {};
+  var selectedMeals   = (store.meals && store.meals[currentDate]) || [];
   var totalKcalBurned = selectedEx.totalCalories || 0;
-  var netKcal         = totalKcalIn - totalKcalBurned;
 
-  // ── Build weight trend (last 7 logged entries) ───────────────────────────
-  var recentWeights = dateKeys.slice(-7);
-  var wMin = recentWeights.length ? Math.min.apply(null, recentWeights.map(function(d){return weightLogs[d];})) : 0;
-  var wMax = recentWeights.length ? Math.max.apply(null, recentWeights.map(function(d){return weightLogs[d];})) : 1;
-  var wRange = wMax - wMin || 1;
-
-  function sparkBar(val) {
-    var pct = Math.round(((val - wMin) / wRange) * 100);
-    return '<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px">'
-      + '<div style="width:100%;background:var(--border);border-radius:4px 4px 0 0;overflow:hidden;height:48px;display:flex;align-items:flex-end">'
-      + '<div style="width:100%;height:' + Math.max(10, pct) + '%;background:var(--accent2);border-radius:4px 4px 0 0"></div>'
-      + '</div>'
-      + '<div style="font-size:0.6rem;color:var(--text-dim);white-space:nowrap">' + val + '</div>'
-      + '</div>';
-  }
-
-  // ── Build strength summary for selected date ─────────────────────────────
-  var workoutName = '';
-  var exRows = '';
-  if (selectedEx.workoutIndex != null && typeof selectedEx.workoutIndex !== 'undefined') {
+  // ── Build workout exercise rows ─────────────────────────────────────────
+  var workoutName = '', exRows = '';
+  if (selectedEx.workoutIndex != null) {
     var wData = (typeof WORKOUTS_DATA !== 'undefined') ? WORKOUTS_DATA[selectedEx.workoutIndex] : null;
     if (wData) {
       workoutName = wData.name;
@@ -3447,88 +3456,242 @@ function renderProgressTab() {
   // ── HTML ─────────────────────────────────────────────────────────────────
   var html = '';
 
-  // Day summary card
-  html += '<div class="card" style="margin-top:20px">'
-    + '<div class="card-label">📅 ' + formatDateLabel(currentDate).toUpperCase() + ' — SUMMARY</div>'
-    + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:10px">'
-    + _progStatChip('🍽', totalKcalIn + ' kcal', 'Consumed', '#60a5fa')
-    + _progStatChip('🔥', totalKcalBurned + ' kcal', 'Burned', '#34d399')
-    + _progStatChip('⚖️', netKcal + ' kcal', 'Net', netKcal > 0 ? '#fb923c' : '#34d399')
+  // Range toggle
+  html += '<div style="display:flex;gap:8px;margin-top:20px;justify-content:center">'
+    + '<button onclick="setProgressRange(\'weekly\')"  id="prog-btn-weekly"  class="prog-range-btn' + (progressRange==='weekly' ?' active':'') + '">Weekly</button>'
+    + '<button onclick="setProgressRange(\'monthly\')" id="prog-btn-monthly" class="prog-range-btn' + (progressRange==='monthly'?' active':'') + '">Monthly</button>'
+    + '</div>';
+
+  // Chart card
+  html += '<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px 14px 14px;margin-top:12px">'
+    + '<div style="font-size:0.72rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-dim);margin-bottom:10px">📈 BODY METRICS TREND</div>'
+    + '<div style="display:flex;gap:16px;margin-bottom:12px;flex-wrap:wrap">'
+    + '<span style="font-size:0.72rem;color:var(--text-dim);display:flex;align-items:center;gap:5px"><span style="display:inline-block;width:14px;height:3px;background:#60a5fa;border-radius:2px;flex-shrink:0"></span>Weight (kg)</span>'
+    + '<span style="font-size:0.72rem;color:var(--text-dim);display:flex;align-items:center;gap:5px"><span style="display:inline-block;width:14px;height:3px;background:#fb923c;border-radius:2px;flex-shrink:0"></span>Waist (cm)</span>'
+    + '<span style="font-size:0.72rem;color:var(--text-dim);display:flex;align-items:center;gap:5px"><span style="display:inline-block;width:14px;height:3px;background:#34d399;border-radius:2px;flex-shrink:0;border-top:1px dashed #34d399"></span>BMI</span>'
+    + '</div>'
+    + '<div id="prog-chart-wrap" style="position:relative;height:200px">'
+    + '<canvas id="progress-chart" style="width:100%;height:100%"></canvas>'
     + '</div>'
     + '</div>';
 
-  // Weight card — log or show
-  html += '<div class="card" style="margin-top:12px">'
-    + '<div class="card-label">⚖️ BODY WEIGHT</div>';
-  if (selectedWeight) {
-    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">'
-      + '<div style="font-size:1.6rem;font-weight:800;color:var(--text)">' + selectedWeight + ' <span style="font-size:0.9rem;color:var(--text-dim)">kg</span></div>'
-      + '<button onclick="promptWeightLog()" style="font-size:0.75rem;padding:5px 12px;border-radius:8px;background:var(--border);color:var(--text-dim);border:none;cursor:pointer">Edit</button>'
-      + '</div>';
-  } else {
-    html += '<div style="margin-top:10px;text-align:center">'
-      + '<p style="font-size:0.85rem;color:var(--text-dim);margin-bottom:10px">No weight logged for this day.</p>'
-      + '<button onclick="promptWeightLog()" style="padding:8px 22px;border-radius:10px;background:var(--accent2);color:#fff;font-weight:700;border:none;cursor:pointer;font-size:0.85rem">+ Log Weight</button>'
-      + '</div>';
-  }
+  // Log CTA buttons
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px">'
+    + '<button onclick="openProgressModal(\'weight\')" style="padding:14px 10px;border-radius:12px;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;font-weight:700;border:none;cursor:pointer;font-size:0.88rem;box-shadow:0 4px 16px rgba(108,99,255,.3);transition:transform .15s" onmouseover="this.style.transform=\'translateY(-1px)\'" onmouseout="this.style.transform=\'\'">⚖️ Log Weight</button>'
+    + '<button onclick="openProgressModal(\'waist\')"  style="padding:14px 10px;border-radius:12px;background:linear-gradient(135deg,#059669,#34d399);color:#fff;font-weight:700;border:none;cursor:pointer;font-size:0.88rem;box-shadow:0 4px 16px rgba(52,211,153,.25);transition:transform .15s" onmouseover="this.style.transform=\'translateY(-1px)\'" onmouseout="this.style.transform=\'\'">📏 Log Waist</button>'
+    + '</div>';
 
-  // Weight trend sparkline
-  if (recentWeights.length > 1) {
-    html += '<div style="display:flex;gap:6px;margin-top:14px;align-items:flex-end">';
-    recentWeights.forEach(function(d) { html += sparkBar(weightLogs[d]); });
-    html += '</div>';
-  }
-  html += '</div>';
-
-  // Exercise card
+  // Workout card
   if (workoutName) {
-    html += '<div class="card" style="margin-top:12px">'
-      + '<div class="card-label">💪 WORKOUT — ' + workoutName.toUpperCase() + '</div>'
-      + (exRows || '<p style="font-size:0.85rem;color:var(--text-dim);margin-top:8px">No sets logged.</p>')
+    html += '<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-top:12px">'
+      + '<div style="font-size:0.72rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-dim);margin-bottom:8px">💪 WORKOUT — ' + workoutName.toUpperCase() + '</div>'
+      + (exRows || '<p style="font-size:0.85rem;color:var(--text-dim)">No sets logged.</p>')
       + (totalKcalBurned ? '<div style="margin-top:10px;padding:8px;background:rgba(52,211,153,.1);border-radius:8px;text-align:center;font-size:0.85rem;color:#34d399;font-weight:700">🔥 ' + totalKcalBurned + ' kcal burned</div>' : '')
       + '</div>';
-  } else {
-    html += '<div class="card" style="margin-top:12px">'
-      + '<div class="card-label">💪 WORKOUT</div>'
-      + '<p style="font-size:0.85rem;color:var(--text-dim);margin-top:8px">No workout logged for this day. Head to the Exercise tab to log one.</p>'
-      + '</div>';
   }
 
-  // Macro breakdown
+  // Macro breakdown card
   if (selectedMeals.length) {
     var tp = 0, tc = 0, tf = 0;
     selectedMeals.forEach(function(m){ tp+=m.protein; tc+=m.carbs; tf+=m.fat; });
-    html += '<div class="card" style="margin-top:12px;margin-bottom:20px">'
-      + '<div class="card-label">🥗 MACRO BREAKDOWN</div>'
-      + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:10px">'
+    html += '<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-top:12px;margin-bottom:20px">'
+      + '<div style="font-size:0.72rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-dim);margin-bottom:10px">🥗 MACRO BREAKDOWN</div>'
+      + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">'
       + _progStatChip('💙', Math.round(tp) + 'g', 'Protein', '#60a5fa')
-      + _progStatChip('💚', Math.round(tc) + 'g', 'Carbs', '#34d399')
-      + _progStatChip('🧡', Math.round(tf) + 'g', 'Fat', '#fb923c')
+      + _progStatChip('💚', Math.round(tc) + 'g', 'Carbs',   '#34d399')
+      + _progStatChip('🧡', Math.round(tf) + 'g', 'Fat',     '#fb923c')
       + '</div></div>';
   }
 
   container.innerHTML = html;
+
+  // Draw chart (async — fetches from API)
+  fetchProgressData();
 }
 
 function _progStatChip(icon, val, label, color) {
-  return '<div style="background:var(--surface-alt,#1e2235);border-radius:10px;padding:10px 6px;text-align:center">'
+  return '<div style="background:var(--surface2);border-radius:10px;padding:10px 6px;text-align:center">'
     + '<div style="font-size:1.1rem">' + icon + '</div>'
     + '<div style="font-size:0.95rem;font-weight:800;color:' + color + ';margin:3px 0">' + val + '</div>'
     + '<div style="font-size:0.65rem;color:var(--text-dim)">' + label + '</div>'
     + '</div>';
 }
 
-function promptWeightLog() {
-  var current = (store.weightLogs && store.weightLogs[currentDate]) || '';
-  var val = prompt('Enter your weight for ' + formatDateLabel(currentDate) + ' (kg):', current);
-  if (val === null) return;
-  var num = parseFloat(val);
-  if (isNaN(num) || num <= 0) { alert('Please enter a valid weight.'); return; }
-  if (!store.weightLogs) store.weightLogs = {};
-  store.weightLogs[currentDate] = num;
-  localStorage.setItem(STORE_KEY, JSON.stringify(store));
-  renderProgressTab();
+// ── Range toggle ────────────────────────────────────────────────────────────
+
+function setProgressRange(range) {
+  progressRange = range;
+  var wBtn = document.getElementById('prog-btn-weekly');
+  var mBtn = document.getElementById('prog-btn-monthly');
+  if (wBtn) wBtn.classList.toggle('active', range === 'weekly');
+  if (mBtn) mBtn.classList.toggle('active', range === 'monthly');
+  fetchProgressData();
 }
+
+// ── Data fetch + chart ──────────────────────────────────────────────────────
+
+function fetchProgressData() {
+  if (!AUTH_TOKEN) { drawProgressChart([]); return; }
+  fetch(API_BASE + '/api/progress?range=' + progressRange, { headers: authHeaders() })
+    .then(function(r) { return r.json(); })
+    .then(function(data) { drawProgressChart(Array.isArray(data) ? data : []); })
+    .catch(function() { drawProgressChart([]); });
+}
+
+function drawProgressChart(data) {
+  var canvas = document.getElementById('progress-chart');
+  if (!canvas) return;
+
+  // Destroy previous instance to avoid canvas reuse error
+  if (progressChart) { progressChart.destroy(); progressChart = null; }
+
+  // Empty state
+  if (!data.length) {
+    var wrap = document.getElementById('prog-chart-wrap');
+    if (wrap) wrap.innerHTML = '<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--text-dim);font-size:0.85rem;gap:8px">'
+      + '<span style="font-size:2rem">📊</span>'
+      + '<span>No data yet — start logging!</span>'
+      + '</div>';
+    return;
+  }
+
+  var labels  = data.map(function(d) { return d.date ? d.date.slice(5) : ''; }); // MM-DD
+  var weights = data.map(function(d) { return (d.weight != null) ? d.weight : null; });
+  var waists  = data.map(function(d) { return (d.waist  != null) ? d.waist  : null; });
+  var bmis    = data.map(function(d) { return (d.bmi    != null) ? d.bmi    : null; });
+
+  var ctx = canvas.getContext('2d');
+  progressChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [
+        {
+          label: 'Weight (kg)',
+          data: weights,
+          borderColor: '#60a5fa',
+          backgroundColor: 'rgba(96,165,250,0.08)',
+          tension: 0.4, fill: true, spanGaps: true,
+          pointRadius: 4, pointHoverRadius: 7,
+          pointBackgroundColor: '#60a5fa', pointBorderColor: '#0f1117', pointBorderWidth: 2,
+          borderWidth: 2.5, yAxisID: 'y',
+        },
+        {
+          label: 'Waist (cm)',
+          data: waists,
+          borderColor: '#fb923c',
+          backgroundColor: 'rgba(251,146,60,0.05)',
+          tension: 0.4, fill: false, spanGaps: true,
+          pointRadius: 4, pointHoverRadius: 7,
+          pointBackgroundColor: '#fb923c', pointBorderColor: '#0f1117', pointBorderWidth: 2,
+          borderWidth: 2.5, yAxisID: 'y',
+        },
+        {
+          label: 'BMI',
+          data: bmis,
+          borderColor: '#34d399',
+          backgroundColor: 'rgba(52,211,153,0.05)',
+          tension: 0.4, fill: false, spanGaps: true,
+          pointRadius: 4, pointHoverRadius: 7,
+          pointBackgroundColor: '#34d399', pointBorderColor: '#0f1117', pointBorderWidth: 2,
+          borderWidth: 2, borderDash: [5, 3], yAxisID: 'y2',
+        },
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: 'rgba(15,17,23,0.96)',
+          borderColor: '#2e3150', borderWidth: 1,
+          titleColor: '#e8eaf6', bodyColor: '#8b90b8',
+          padding: 12, cornerRadius: 8,
+          callbacks: {
+            title: function(items) { return items.length ? items[0].label : ''; },
+            label: function(ctx) {
+              if (ctx.parsed.y == null) return null;
+              var suffixes = [' kg', ' cm', ''];
+              return '  ' + ctx.dataset.label + ': ' + ctx.parsed.y.toFixed(1) + (suffixes[ctx.datasetIndex] || '');
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid: { color: 'rgba(46,49,80,0.35)', drawBorder: false },
+          ticks: { color: '#8b90b8', font: { size: 10 }, maxRotation: 0, maxTicksLimit: 7 }
+        },
+        y: {
+          position: 'left',
+          grid: { color: 'rgba(46,49,80,0.35)', drawBorder: false },
+          ticks: { color: '#8b90b8', font: { size: 10 }, padding: 6 },
+          border: { color: 'transparent', dash: [3,3] }
+        },
+        y2: {
+          position: 'right',
+          grid: { drawOnChartArea: false },
+          ticks: { color: '#34d399', font: { size: 10 }, padding: 6 },
+          border: { color: 'transparent' }
+        }
+      }
+    }
+  });
+}
+
+// ── Progress log modal ──────────────────────────────────────────────────────
+
+function openProgressModal(type) {
+  progressLogType = type;
+  var title = document.getElementById('prog-modal-title');
+  var label = document.getElementById('prog-log-label');
+  var desc  = document.getElementById('prog-modal-desc');
+  var input = document.getElementById('prog-log-value');
+  var dateInput = document.getElementById('prog-log-date');
+
+  if (type === 'weight') {
+    title.textContent = '⚖️ Log Weight';
+    label.textContent = 'Weight (kg)';
+    if (desc) desc.textContent = 'Record your body weight to track progress over time.';
+    input.placeholder = '70.5';
+    input.step = '0.1';
+  } else {
+    title.textContent = '📏 Log Waist';
+    label.textContent = 'Waist circumference (cm)';
+    if (desc) desc.textContent = 'Record your waist measurement to track body composition changes.';
+    input.placeholder = '80.0';
+    input.step = '0.5';
+  }
+
+  dateInput.value = currentDate;
+  input.value = '';
+  openModal('modal-progress-log');
+}
+
+document.getElementById('btn-save-progress').onclick = function() {
+  var date  = document.getElementById('prog-log-date').value;
+  var value = parseFloat(document.getElementById('prog-log-value').value);
+  if (!date || isNaN(value) || value <= 0) {
+    alert('Please enter a valid value.');
+    return;
+  }
+  var btn = this;
+  btn.disabled = true;
+  fetch(API_BASE + '/api/progress/' + progressLogType, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ date: date, value: value })
+  })
+  .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+  .then(function() {
+    closeModal('modal-progress-log');
+    fetchProgressData();   // refresh chart immediately
+  })
+  .catch(function(e) { alert('Failed to save: ' + e); })
+  .finally(function() { btn.disabled = false; });
+};
 </script>
 </body>
 </html>

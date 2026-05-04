@@ -269,6 +269,21 @@ def _init_db() -> None:
                         _seeded += 1
                 print(f"food_cache seeded: {_seeded} new static foods inserted ({len(_static_foods)} total).")
 
+            # ── Body-metrics progress log ──────────────────────────────────
+            # One row per user per date.  BMI recomputed from user height.
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS progress_logs (
+                    id         SERIAL PRIMARY KEY,
+                    username   TEXT NOT NULL,
+                    date       DATE NOT NULL,
+                    weight     REAL,
+                    waist      REAL,
+                    bmi        REAL,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    UNIQUE(username, date)
+                )
+            """)
+
             # ── Seed static workouts and exercises ─────────────────────────
             for workout in _WORKOUT_SEED:
                 w_id = _workout_uuid(workout['name'])
@@ -1386,6 +1401,83 @@ def get_workout_today(date: str, user: dict = Depends(_get_user_from_token)):
     finally:
         conn.close()
     return result
+
+
+# ── Progress Endpoints ─────────────────────────────────────────────────────
+
+class ProgressLogRequest(BaseModel):
+    date:  str
+    value: float
+
+
+@app.get('/api/progress')
+def get_progress(range: str = 'weekly', user: dict = Depends(_get_user_from_token)):
+    """Return body-metric log entries for the requested range (weekly=7d, monthly=30d)."""
+    days = 7 if range == 'weekly' else 30
+    conn = _db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT date, weight, waist, bmi
+                FROM progress_logs
+                WHERE username = %s
+                  AND date >= (CURRENT_DATE - INTERVAL '1 day' * %s)
+                ORDER BY date ASC
+            """, (user['username'], days))
+            rows = [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
+    return [
+        {
+            'date':   str(r['date']),
+            'weight': r['weight'],
+            'waist':  r['waist'],
+            'bmi':    r['bmi'],
+        }
+        for r in rows
+    ]
+
+
+@app.post('/api/progress/weight')
+def log_weight(req: ProgressLogRequest, user: dict = Depends(_get_user_from_token)):
+    """Upsert a weight entry; auto-computes BMI from stored height."""
+    height_cm = user.get('height_cm') or 0
+    bmi = None
+    if height_cm > 0:
+        h = height_cm / 100.0
+        bmi = round(req.value / (h * h), 1)
+
+    conn = _db()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO progress_logs (username, date, weight, bmi)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (username, date)
+                    DO UPDATE SET weight = EXCLUDED.weight, bmi = EXCLUDED.bmi
+                """, (user['username'], req.date, req.value, bmi))
+    finally:
+        conn.close()
+    return {'ok': True, 'bmi': bmi}
+
+
+@app.post('/api/progress/waist')
+def log_waist(req: ProgressLogRequest, user: dict = Depends(_get_user_from_token)):
+    """Upsert a waist measurement entry."""
+    conn = _db()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO progress_logs (username, date, waist)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (username, date)
+                    DO UPDATE SET waist = EXCLUDED.waist
+                """, (user['username'], req.date, req.value))
+    finally:
+        conn.close()
+    return {'ok': True}
 
 
 @app.post('/api/lookup', response_model=LookupResponse)
