@@ -224,12 +224,13 @@ def _init_db() -> None:
             """)
 
             # ── AI food lookup cache ───────────────────────────────────────
-            # Persists Gemini responses across restarts; shared across all users.
+            # Persists all food lookups across restarts; shared across all users.
+            # Static foods seeded at startup; AI-found foods added on demand.
             # Keyed on normalised food name (lowercase, stripped).
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS food_cache (
                     name_key     TEXT PRIMARY KEY,          -- normalised lookup key
-                    name         TEXT NOT NULL,             -- display name from Gemini
+                    name         TEXT NOT NULL,             -- display name
                     unit         TEXT NOT NULL,
                     serving_g    REAL NOT NULL,
                     protein_100  REAL NOT NULL,
@@ -243,6 +244,30 @@ def _init_db() -> None:
                     created_at   TIMESTAMPTZ DEFAULT NOW()
                 )
             """)
+
+            # ── Seed static foods into food_cache (idempotent) ─────────────
+            if os.path.exists(META_PATH):
+                with open(META_PATH) as _fh:
+                    _static_foods = json.load(_fh)
+                _seeded = 0
+                for _food in _static_foods:
+                    _sg   = _food.get('sg', 100)
+                    _k100 = round(_food['p']*4 + _food['c']*4 + _food['f']*9, 1)
+                    cur.execute("""
+                        INSERT INTO food_cache
+                            (name_key, name, unit, serving_g,
+                             protein_100, carbs_100, fat_100, kcal_100,
+                             protein_srv, carbs_srv, fat_srv, kcal_srv)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        ON CONFLICT (name_key) DO NOTHING
+                    """, (
+                        _food['n'].lower(), _food['n'], _food['u'], _sg,
+                        _food['p'], _food['c'], _food['f'], _k100,
+                        _food['up'], _food['uc'], _food['uf'], _food['uk'],
+                    ))
+                    if cur.rowcount:
+                        _seeded += 1
+                print(f"food_cache seeded: {_seeded} new static foods inserted ({len(_static_foods)} total).")
 
             # ── Seed static workouts and exercises ─────────────────────────
             for workout in _WORKOUT_SEED:
@@ -374,10 +399,10 @@ def _bm25_search(query: str, k: int = 30) -> list[dict]:
 
 
 def _add_food_to_list(food: dict) -> None:
+    """Add a new food to the in-memory BM25 index (used by /api/suggest fallback).
+    Static foods are seeded into food_cache at startup; no file write needed."""
     resources['foods'].append(food)
     resources['bm25'] = _build_bm25(resources['foods'])
-    with open(META_PATH, 'w') as fh:
-        json.dump(resources['foods'], fh, separators=(',', ':'))
 
 
 # ── food_cache DB helpers ──────────────────────────────────────────────────
@@ -1370,20 +1395,8 @@ def lookup(req: LookupRequest):
 
     q = req.food_name.strip().lower()
 
-    # ── Tier 1: in-memory static food list (1 023 foods, always loaded) ──────
-    for food in resources['foods']:
-        if food['n'].lower() == q:
-            p100, c100, f100 = food['p'], food['c'], food['f']
-            k100 = round(p100*4 + c100*4 + f100*9, 1)
-            print(f"[LLM_CALL_SKIPPED_DB_HIT] source=memory name_key={q!r}")
-            return LookupResponse(
-                name=food['n'], unit=food['u'],
-                protein_per_100=p100, carbs_per_100=c100, fat_per_100=f100, kcal_per_100=k100,
-                protein_per_serving=food['up'], carbs_per_serving=food['uc'],
-                fat_per_serving=food['uf'], kcal_per_serving=food['uk'], source='cache',
-            )
-
-    # ── Tier 2: PostgreSQL food_cache (AI-looked-up foods, persisted) ─────────
+    # ── Tier 1: PostgreSQL food_cache (static + AI-found foods, persisted) ────
+    # Static foods (1 023) are seeded here at startup; AI results added on demand.
     row = _food_cache_get(q)
     if row:
         print(f"[LLM_CALL_SKIPPED_DB_HIT] source=food_cache name_key={q!r}")
@@ -1396,14 +1409,14 @@ def lookup(req: LookupRequest):
             source='db_cache',
         )
 
-    # ── Tier 3: Gemini API — only reached on genuine cache miss ───────────────
+    # ── Tier 2: Gemini API — only reached on genuine cache miss ───────────────
     print(f"[LLM_CALL_TRIGGERED] provider=gemini endpoint=gemini-2.5-flash-lite name_key={q!r}")
     try:
         food = _lookup_nutrition(req.food_name)
     except Exception as e:
         raise HTTPException(503, f'AI lookup failed: {e}')
 
-    # Persist to DB (survives restarts) + add to in-memory index for this session
+    # Persist to food_cache (survives restarts) + update BM25 index for suggest
     _food_cache_put(q, food)
     _add_food_to_list(food)
 
