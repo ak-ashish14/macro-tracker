@@ -11,5 +11,5 @@ services:
         generateValue: true
       - key: DATABASE_URL
         sync: false          # set manually in Render dashboard (Neon connection string)
-      - key: GROQ_API_KEY
-        sync: false          # set in Render dashboard – enables AI food lookup (free at console.groq.com)
+      - key: GEMINI_API_KEY
+        sync: false          # set in Render dashboard – enables AI food lookup via Gemini 2.5 Flash Lite

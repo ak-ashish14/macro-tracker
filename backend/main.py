@@ -223,6 +223,27 @@ def _init_db() -> None:
                 )
             """)
 
+            # ── AI food lookup cache ───────────────────────────────────────
+            # Persists Gemini responses across restarts; shared across all users.
+            # Keyed on normalised food name (lowercase, stripped).
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS food_cache (
+                    name_key     TEXT PRIMARY KEY,          -- normalised lookup key
+                    name         TEXT NOT NULL,             -- display name from Gemini
+                    unit         TEXT NOT NULL,
+                    serving_g    REAL NOT NULL,
+                    protein_100  REAL NOT NULL,
+                    carbs_100    REAL NOT NULL,
+                    fat_100      REAL NOT NULL,
+                    kcal_100     REAL NOT NULL,
+                    protein_srv  REAL NOT NULL,
+                    carbs_srv    REAL NOT NULL,
+                    fat_srv      REAL NOT NULL,
+                    kcal_srv     REAL NOT NULL,
+                    created_at   TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+
             # ── Seed static workouts and exercises ─────────────────────────
             for workout in _WORKOUT_SEED:
                 w_id = _workout_uuid(workout['name'])
@@ -357,6 +378,53 @@ def _add_food_to_list(food: dict) -> None:
     resources['bm25'] = _build_bm25(resources['foods'])
     with open(META_PATH, 'w') as fh:
         json.dump(resources['foods'], fh, separators=(',', ':'))
+
+
+# ── food_cache DB helpers ──────────────────────────────────────────────────
+
+def _food_cache_get(name_key: str) -> dict | None:
+    """Return cached food row from DB, or None if not found."""
+    if not DATABASE_URL:
+        return None
+    try:
+        conn = _db()
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM food_cache WHERE name_key = %s", (name_key,))
+            row = cur.fetchone()
+        conn.close()
+        return dict(row) if row else None
+    except Exception as e:
+        print(f"food_cache GET error: {e}", file=sys.stderr)
+        return None
+
+
+def _food_cache_put(name_key: str, food: dict) -> None:
+    """Persist a Gemini-returned food dict into the DB cache."""
+    if not DATABASE_URL:
+        return
+    try:
+        sg = food.get('sg', 100)
+        conn = _db()
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO food_cache
+                        (name_key, name, unit, serving_g,
+                         protein_100, carbs_100, fat_100, kcal_100,
+                         protein_srv, carbs_srv, fat_srv, kcal_srv)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT (name_key) DO NOTHING
+                """, (
+                    name_key,
+                    food['n'], food['u'], sg,
+                    food['p'], food['c'], food['f'],
+                    round(food['p']*4 + food['c']*4 + food['f']*9, 1),
+                    food['up'], food['uc'], food['uf'], food['uk'],
+                ))
+        conn.close()
+        print(f"[FOOD_ITEM_STORED] name_key={name_key!r} name={food['n']!r} stored in food_cache")
+    except Exception as e:
+        print(f"food_cache PUT error for {name_key!r}: {e}", file=sys.stderr)
 
 
 # ── Lifespan ───────────────────────────────────────────────────────────────
@@ -652,7 +720,7 @@ def _lookup_nutrition(food_name: str) -> dict:
     f100 = round(float(d['fat_100']),     1)
     k100 = round(p100*4 + c100*4 + f100*9, 1)
     return {
-        'n': d['name'], 'u': d['unit'],
+        'n': d['name'], 'u': d['unit'], 'sg': sg,
         'p': p100, 'c': c100, 'f': f100, 'k': k100,
         'up': round(p100*sg/100, 2), 'uc': round(c100*sg/100, 2),
         'uf': round(f100*sg/100, 2), 'uk': round(k100*sg/100, 1),
@@ -1299,22 +1367,46 @@ def get_workout_today(date: str, user: dict = Depends(_get_user_from_token)):
 def lookup(req: LookupRequest):
     if not req.food_name.strip():
         raise HTTPException(400, 'food_name must not be empty')
+
     q = req.food_name.strip().lower()
+
+    # ── Tier 1: in-memory static food list (1 023 foods, always loaded) ──────
     for food in resources['foods']:
         if food['n'].lower() == q:
             p100, c100, f100 = food['p'], food['c'], food['f']
             k100 = round(p100*4 + c100*4 + f100*9, 1)
+            print(f"[LLM_CALL_SKIPPED_DB_HIT] source=memory name_key={q!r}")
             return LookupResponse(
                 name=food['n'], unit=food['u'],
                 protein_per_100=p100, carbs_per_100=c100, fat_per_100=f100, kcal_per_100=k100,
                 protein_per_serving=food['up'], carbs_per_serving=food['uc'],
                 fat_per_serving=food['uf'], kcal_per_serving=food['uk'], source='cache',
             )
+
+    # ── Tier 2: PostgreSQL food_cache (AI-looked-up foods, persisted) ─────────
+    row = _food_cache_get(q)
+    if row:
+        print(f"[LLM_CALL_SKIPPED_DB_HIT] source=food_cache name_key={q!r}")
+        return LookupResponse(
+            name=row['name'], unit=row['unit'],
+            protein_per_100=row['protein_100'], carbs_per_100=row['carbs_100'],
+            fat_per_100=row['fat_100'], kcal_per_100=row['kcal_100'],
+            protein_per_serving=row['protein_srv'], carbs_per_serving=row['carbs_srv'],
+            fat_per_serving=row['fat_srv'], kcal_per_serving=row['kcal_srv'],
+            source='db_cache',
+        )
+
+    # ── Tier 3: Gemini API — only reached on genuine cache miss ───────────────
+    print(f"[LLM_CALL_TRIGGERED] provider=gemini endpoint=gemini-2.5-flash-lite name_key={q!r}")
     try:
         food = _lookup_nutrition(req.food_name)
     except Exception as e:
         raise HTTPException(503, f'AI lookup failed: {e}')
+
+    # Persist to DB (survives restarts) + add to in-memory index for this session
+    _food_cache_put(q, food)
     _add_food_to_list(food)
+
     p100, c100, f100 = food['p'], food['c'], food['f']
     k100 = round(p100*4 + c100*4 + f100*9, 1)
     return LookupResponse(
