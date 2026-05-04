@@ -2863,7 +2863,9 @@ function switchTab(tab) {
   document.getElementById('section-exercise').style.display  = tab === 'exercise'  ? '' : 'none';
   document.getElementById('section-progress').style.display  = tab === 'progress'  ? '' : 'none';
 
-  // Date nav is shared across all tabs — always visible
+  // Date nav — hide on Progress tab (uses its own range toggle)
+  var dateNav = document.querySelector('.date-nav');
+  if (dateNav) dateNav.style.display = tab === 'progress' ? 'none' : '';
 
   // Tab bar highlight
   ['nutrition', 'exercise', 'progress'].forEach(function(t) {
@@ -3466,9 +3468,8 @@ function renderProgressTab() {
   html += '<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px 14px 14px;margin-top:12px">'
     + '<div style="font-size:0.72rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-dim);margin-bottom:10px">📈 BODY METRICS TREND</div>'
     + '<div style="display:flex;gap:16px;margin-bottom:12px;flex-wrap:wrap">'
-    + '<span style="font-size:0.72rem;color:var(--text-dim);display:flex;align-items:center;gap:5px"><span style="display:inline-block;width:14px;height:3px;background:#60a5fa;border-radius:2px;flex-shrink:0"></span>Weight (kg)</span>'
-    + '<span style="font-size:0.72rem;color:var(--text-dim);display:flex;align-items:center;gap:5px"><span style="display:inline-block;width:14px;height:3px;background:#fb923c;border-radius:2px;flex-shrink:0"></span>Waist (cm)</span>'
-    + '<span style="font-size:0.72rem;color:var(--text-dim);display:flex;align-items:center;gap:5px"><span style="display:inline-block;width:14px;height:3px;background:#34d399;border-radius:2px;flex-shrink:0;border-top:1px dashed #34d399"></span>BMI</span>'
+    + '<span style="font-size:0.72rem;color:#ff9a3c;display:flex;align-items:center;gap:5px"><span style="display:inline-block;width:14px;height:3px;background:#ff6a00;border-radius:2px;flex-shrink:0;box-shadow:0 0 6px #ff6a00"></span>Weight (kg)</span>'
+    + '<span style="font-size:0.72rem;color:#ffd080;display:flex;align-items:center;gap:5px"><span style="display:inline-block;width:14px;height:3px;background:#ffcc66;border-radius:2px;flex-shrink:0;box-shadow:0 0 6px #ffcc66"></span>Waist (cm)</span>'
     + '</div>'
     + '<div id="prog-chart-wrap" style="position:relative;height:200px">'
     + '<canvas id="progress-chart" style="width:100%;height:100%"></canvas>'
@@ -3542,7 +3543,6 @@ function drawProgressChart(data) {
   var canvas = document.getElementById('progress-chart');
   if (!canvas) return;
 
-  // Destroy previous instance to avoid canvas reuse error
   if (progressChart) { progressChart.destroy(); progressChart = null; }
 
   // Empty state
@@ -3555,10 +3555,23 @@ function drawProgressChart(data) {
     return;
   }
 
-  var labels  = data.map(function(d) { return d.date ? d.date.slice(5) : ''; }); // MM-DD
-  var weights = data.map(function(d) { return (d.weight != null) ? d.weight : null; });
-  var waists  = data.map(function(d) { return (d.waist  != null) ? d.waist  : null; });
-  var bmis    = data.map(function(d) { return (d.bmi    != null) ? d.bmi    : null; });
+  var labels  = data.map(function(d) { return d.date ? d.date.slice(5) : ''; });
+  var weights = data.map(function(d) { return d.weight != null ? d.weight : null; });
+  var waists  = data.map(function(d) { return d.waist  != null ? d.waist  : null; });
+
+  // Gradient factory — called lazily by Chart.js on each resize
+  function makeGrad(r, g, b, alphaTop, alphaBot) {
+    return function(context) {
+      var chart = context.chart;
+      var area  = chart.chartArea;
+      if (!area) return 'transparent';
+      var grad = chart.ctx.createLinearGradient(0, area.top, 0, area.bottom);
+      grad.addColorStop(0,   'rgba(' + r + ',' + g + ',' + b + ',' + alphaTop + ')');
+      grad.addColorStop(0.55,'rgba(' + r + ',' + g + ',' + b + ',0.06)');
+      grad.addColorStop(1,   'rgba(' + r + ',' + g + ',' + b + ',' + alphaBot + ')');
+      return grad;
+    };
+  }
 
   var ctx = canvas.getContext('2d');
   progressChart = new Chart(ctx, {
@@ -3566,35 +3579,49 @@ function drawProgressChart(data) {
     data: {
       labels: labels,
       datasets: [
+        // ── Weight glow bloom (drawn first = underneath) ──────────────────
+        {
+          label: '',
+          data: weights,
+          borderColor: 'rgba(255,106,0,0.22)',
+          borderWidth: 20,
+          pointRadius: 0, pointHoverRadius: 0,
+          fill: false, tension: 0.4, spanGaps: true, yAxisID: 'y',
+        },
+        // ── Waist glow bloom ──────────────────────────────────────────────
+        {
+          label: '',
+          data: waists,
+          borderColor: 'rgba(255,204,102,0.18)',
+          borderWidth: 16,
+          pointRadius: 0, pointHoverRadius: 0,
+          fill: false, tension: 0.4, spanGaps: true, yAxisID: 'y',
+        },
+        // ── Weight main line + gradient fill ──────────────────────────────
         {
           label: 'Weight (kg)',
           data: weights,
-          borderColor: '#60a5fa',
-          backgroundColor: 'rgba(96,165,250,0.08)',
-          tension: 0.4, fill: true, spanGaps: true,
+          borderColor: '#ff6a00',
+          backgroundColor: makeGrad(255, 106, 0, 0.52, 0),
+          fill: true, tension: 0.4, spanGaps: true,
+          borderWidth: 2.5,
           pointRadius: 4, pointHoverRadius: 7,
-          pointBackgroundColor: '#60a5fa', pointBorderColor: '#0f1117', pointBorderWidth: 2,
-          borderWidth: 2.5, yAxisID: 'y',
+          pointBackgroundColor: '#ff9a3c',
+          pointBorderColor: 'rgba(255,106,0,0.5)', pointBorderWidth: 3,
+          yAxisID: 'y',
         },
+        // ── Waist main line + gradient fill ───────────────────────────────
         {
           label: 'Waist (cm)',
           data: waists,
-          borderColor: '#fb923c',
-          backgroundColor: 'rgba(251,146,60,0.05)',
-          tension: 0.4, fill: false, spanGaps: true,
-          pointRadius: 4, pointHoverRadius: 7,
-          pointBackgroundColor: '#fb923c', pointBorderColor: '#0f1117', pointBorderWidth: 2,
-          borderWidth: 2.5, yAxisID: 'y',
-        },
-        {
-          label: 'BMI',
-          data: bmis,
-          borderColor: '#34d399',
-          backgroundColor: 'rgba(52,211,153,0.05)',
-          tension: 0.4, fill: false, spanGaps: true,
-          pointRadius: 4, pointHoverRadius: 7,
-          pointBackgroundColor: '#34d399', pointBorderColor: '#0f1117', pointBorderWidth: 2,
-          borderWidth: 2, borderDash: [5, 3], yAxisID: 'y2',
+          borderColor: '#ffcc66',
+          backgroundColor: makeGrad(255, 204, 102, 0.38, 0),
+          fill: true, tension: 0.4, spanGaps: true,
+          borderWidth: 2,
+          pointRadius: 3, pointHoverRadius: 6,
+          pointBackgroundColor: '#ffdd99',
+          pointBorderColor: 'rgba(255,204,102,0.45)', pointBorderWidth: 2,
+          yAxisID: 'y',
         },
       ]
     },
@@ -3605,35 +3632,31 @@ function drawProgressChart(data) {
       plugins: {
         legend: { display: false },
         tooltip: {
-          backgroundColor: 'rgba(15,17,23,0.96)',
-          borderColor: '#2e3150', borderWidth: 1,
-          titleColor: '#e8eaf6', bodyColor: '#8b90b8',
+          backgroundColor: 'rgba(12,14,20,0.97)',
+          borderColor: 'rgba(255,106,0,0.25)', borderWidth: 1,
+          titleColor: '#e8eaf6', bodyColor: '#ff9a3c',
           padding: 12, cornerRadius: 8,
           callbacks: {
             title: function(items) { return items.length ? items[0].label : ''; },
-            label: function(ctx) {
-              if (ctx.parsed.y == null) return null;
-              var suffixes = [' kg', ' cm', ''];
-              return '  ' + ctx.dataset.label + ': ' + ctx.parsed.y.toFixed(1) + (suffixes[ctx.datasetIndex] || '');
+            label: function(c) {
+              // Skip glow datasets (no label)
+              if (!c.dataset.label) return null;
+              if (c.parsed.y == null) return null;
+              var unit = c.dataset.label.indexOf('kg') >= 0 ? ' kg' : ' cm';
+              return '  ' + c.dataset.label + ': ' + c.parsed.y.toFixed(1) + unit;
             }
           }
         }
       },
       scales: {
         x: {
-          grid: { color: 'rgba(46,49,80,0.35)', drawBorder: false },
+          grid: { color: 'rgba(255,106,0,0.08)', drawBorder: false },
           ticks: { color: '#8b90b8', font: { size: 10 }, maxRotation: 0, maxTicksLimit: 7 }
         },
         y: {
           position: 'left',
-          grid: { color: 'rgba(46,49,80,0.35)', drawBorder: false },
-          ticks: { color: '#8b90b8', font: { size: 10 }, padding: 6 },
-          border: { color: 'transparent', dash: [3,3] }
-        },
-        y2: {
-          position: 'right',
-          grid: { drawOnChartArea: false },
-          ticks: { color: '#34d399', font: { size: 10 }, padding: 6 },
+          grid: { color: 'rgba(255,106,0,0.07)', drawBorder: false },
+          ticks: { color: '#a0856a', font: { size: 10 }, padding: 6 },
           border: { color: 'transparent' }
         }
       }
